@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from loom_cli import builtin as builtin_mod
@@ -390,7 +391,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     return 0
 
 
-_DISPATCH: dict[str, callable] = {  # type: ignore[type-arg]
+_DISPATCH: dict[str, Callable[[argparse.Namespace], int]] = {
     "list": _cmd_list,
     "show": _cmd_show,
     "install": _cmd_install,

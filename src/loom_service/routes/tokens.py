@@ -125,11 +125,11 @@ async def create_token(
                 status_code=403,
                 detail="cannot mint into another team",
             )
-        for sc in payload.scopes:
-            if sc not in _TEAM_ALLOWED_SCOPES:
+        for scope in payload.scopes:
+            if scope not in _TEAM_ALLOWED_SCOPES:
                 raise HTTPException(
                     status_code=403,
-                    detail=f"scope {sc!r} requires admin:tokens",
+                    detail=f"scope {scope!r} requires admin:tokens",
                 )
 
     # Admin tokens are global — accidentally pinning one to a team

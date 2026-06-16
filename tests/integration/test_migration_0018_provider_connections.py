@@ -10,10 +10,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.exc import IntegrityError
 from testcontainers.postgres import PostgresContainer
 
@@ -50,6 +50,31 @@ def team_id(postgres_url: str) -> str:
             "INSERT INTO team_quotas (team_id) VALUES (:t)",
         ), {"t": tid})
     return str(tid)
+
+
+def _insert_connection(
+    conn: Connection,
+    *,
+    team_id: str,
+    display_name: str,
+    ref: str = "loom://test/ref",
+    status: str = "pending",
+    provider_type: str = "openai-compatible",
+) -> UUID:
+    """Insert a provider_connection row with explicit UUID — there's no
+    server-side default for `id` (the ORM provides default=uuid4 per the
+    convention used by other tables). Returns the new row's UUID."""
+    conn_id = uuid4()
+    conn.execute(text(
+        "INSERT INTO provider_connections "
+        "(id, team_id, provider_type, display_name, base_url, "
+        " upstream_host, encrypted_api_key_ref, status, created_by) "
+        "VALUES (:id, :t, :pt, :n, 'https://x', 'x', :ref, :st, 'admin:0')",
+    ), {
+        "id": conn_id, "t": team_id, "pt": provider_type,
+        "n": display_name, "ref": ref, "st": status,
+    })
+    return conn_id
 
 
 def test_three_new_tables_exist(postgres_url: str) -> None:
@@ -94,13 +119,8 @@ def test_check_constraint_rejects_invalid_status(
 ) -> None:
     engine = create_engine(postgres_url)
     with engine.begin() as conn, pytest.raises(IntegrityError):
-        conn.execute(text(
-            "INSERT INTO provider_connections "
-            "(team_id, provider_type, display_name, base_url, "
-            " upstream_host, encrypted_api_key_ref, status, created_by) "
-            "VALUES (:t, 'openai-compatible', 'test', 'https://x', "
-            "        'x', 'loom://ref', 'bogus-status', 'admin:0')",
-        ), {"t": team_id})
+        _insert_connection(conn, team_id=team_id, display_name="ss",
+                           status="bogus-status")
 
 
 def test_check_constraint_rejects_invalid_provider_type(
@@ -108,13 +128,8 @@ def test_check_constraint_rejects_invalid_provider_type(
 ) -> None:
     engine = create_engine(postgres_url)
     with engine.begin() as conn, pytest.raises(IntegrityError):
-        conn.execute(text(
-            "INSERT INTO provider_connections "
-            "(team_id, provider_type, display_name, base_url, "
-            " upstream_host, encrypted_api_key_ref, created_by) "
-            "VALUES (:t, 'azure-flavor', 'test', 'https://x', "
-            "        'x', 'loom://ref', 'admin:0')",
-        ), {"t": team_id})
+        _insert_connection(conn, team_id=team_id, display_name="pt",
+                           provider_type="azure-flavor")
 
 
 def test_partial_unique_index_allows_reuse_after_soft_delete(
@@ -124,23 +139,13 @@ def test_partial_unique_index_allows_reuse_after_soft_delete(
     with that name has been soft-deleted."""
     engine = create_engine(postgres_url)
     with engine.begin() as conn:
-        conn.execute(text(
-            "INSERT INTO provider_connections "
-            "(team_id, provider_type, display_name, base_url, "
-            " upstream_host, encrypted_api_key_ref, created_by) "
-            "VALUES (:t, 'openai-compatible', 'prod', 'https://x', "
-            "        'x', 'loom://1', 'admin:0')",
-        ), {"t": team_id})
+        _insert_connection(conn, team_id=team_id, display_name="prod",
+                           ref="loom://1")
 
     # Same name, ACTIVE → must fail.
     with engine.begin() as conn, pytest.raises(IntegrityError):
-        conn.execute(text(
-            "INSERT INTO provider_connections "
-            "(team_id, provider_type, display_name, base_url, "
-            " upstream_host, encrypted_api_key_ref, created_by) "
-            "VALUES (:t, 'openai-compatible', 'prod', 'https://x', "
-            "        'x', 'loom://2', 'admin:0')",
-        ), {"t": team_id})
+        _insert_connection(conn, team_id=team_id, display_name="prod",
+                           ref="loom://2")
 
     # Soft-delete the first, then insert with the same name → must succeed.
     with engine.begin() as conn:
@@ -148,13 +153,8 @@ def test_partial_unique_index_allows_reuse_after_soft_delete(
             "UPDATE provider_connections SET deleted_at = now() "
             "WHERE team_id = :t AND display_name = 'prod'",
         ), {"t": team_id})
-        conn.execute(text(
-            "INSERT INTO provider_connections "
-            "(team_id, provider_type, display_name, base_url, "
-            " upstream_host, encrypted_api_key_ref, created_by) "
-            "VALUES (:t, 'openai-compatible', 'prod', 'https://x', "
-            "        'x', 'loom://3', 'admin:0')",
-        ), {"t": team_id})
+        _insert_connection(conn, team_id=team_id, display_name="prod",
+                           ref="loom://3")
 
 
 def test_updated_at_trigger_fires_on_update(
@@ -165,13 +165,7 @@ def test_updated_at_trigger_fires_on_update(
     cache invalidation pattern (cluster-deploy.md §Cache durability)."""
     engine = create_engine(postgres_url)
     with engine.begin() as conn:
-        conn.execute(text(
-            "INSERT INTO provider_connections "
-            "(team_id, provider_type, display_name, base_url, "
-            " upstream_host, encrypted_api_key_ref, created_by) "
-            "VALUES (:t, 'openai-compatible', 'utest', 'https://x', "
-            "        'x', 'loom://ref', 'admin:0')",
-        ), {"t": team_id})
+        _insert_connection(conn, team_id=team_id, display_name="utest")
         before = conn.execute(text(
             "SELECT updated_at FROM provider_connections "
             "WHERE team_id = :t AND display_name = 'utest'",
@@ -200,18 +194,8 @@ def test_provider_connection_delete_cascades_to_models_cache(
     `loom admin providers purge` verb) cleans up the cache rows."""
     engine = create_engine(postgres_url)
     with engine.begin() as conn:
-        conn.execute(text(
-            "INSERT INTO provider_connections "
-            "(team_id, provider_type, display_name, base_url, "
-            " upstream_host, encrypted_api_key_ref, created_by) "
-            "VALUES (:t, 'openai-compatible', 'casc', 'https://x', "
-            "        'x', 'loom://ref', 'admin:0') "
-            "RETURNING id",
-        ), {"t": team_id})
-        conn_id = conn.execute(text(
-            "SELECT id FROM provider_connections "
-            "WHERE team_id = :t AND display_name = 'casc'",
-        ), {"t": team_id}).scalar_one()
+        conn_id = _insert_connection(conn, team_id=team_id,
+                                     display_name="casc")
         conn.execute(text(
             "INSERT INTO provider_models_cache "
             "(provider_connection_id, model_id) "
@@ -230,6 +214,51 @@ def test_provider_connection_delete_cascades_to_models_cache(
     assert remaining == 0
 
 
+def test_team_delete_blocked_by_existing_provider_connections(
+    postgres_url: str, team_id: str,
+) -> None:
+    """team_id FK is ON DELETE RESTRICT (NOT CASCADE) — hard-deleting a
+    team with active provider_connections must fail, so the operator
+    has to soft-delete the connections first (and let the future
+    `loom admin teams purge` reclaim them). Without RESTRICT, a team
+    delete would silently nuke the connections AND orphan any
+    Trial.provider_connection_id FK pointing at them (the Trial FK has
+    no cascade per spec). Important to validate at the DB layer because
+    the spec originally said CASCADE — this guards against drift."""
+    engine = create_engine(postgres_url)
+    with engine.begin() as conn:
+        _insert_connection(conn, team_id=team_id, display_name="blockme")
+
+    with engine.begin() as conn, pytest.raises(IntegrityError):
+        conn.execute(text(
+            "DELETE FROM teams WHERE id = :t",
+        ), {"t": team_id})
+
+    # Soft-delete the connection, then try team delete — should still
+    # fail because the row physically exists (soft-delete only sets
+    # deleted_at). Operator must hard-delete connections (e.g., via
+    # `loom admin providers purge`) before deleting the team.
+    with engine.begin() as conn:
+        conn.execute(text(
+            "UPDATE provider_connections SET deleted_at = now() "
+            "WHERE team_id = :t",
+        ), {"t": team_id})
+    with engine.begin() as conn, pytest.raises(IntegrityError):
+        conn.execute(text("DELETE FROM teams WHERE id = :t"), {"t": team_id})
+
+    # Hard-delete the connection, then team delete succeeds.
+    with engine.begin() as conn:
+        conn.execute(text(
+            "DELETE FROM provider_connections WHERE team_id = :t",
+        ), {"t": team_id})
+    with engine.begin() as conn:
+        # team_quotas FK is CASCADE; clean it first to mimic real flow.
+        conn.execute(text(
+            "DELETE FROM team_quotas WHERE team_id = :t",
+        ), {"t": team_id})
+        conn.execute(text("DELETE FROM teams WHERE id = :t"), {"t": team_id})
+
+
 def test_models_cache_hidden_reason_check(
     postgres_url: str, team_id: str,
 ) -> None:
@@ -238,17 +267,7 @@ def test_models_cache_hidden_reason_check(
     to the rev-10 design where 'disabled-pricing' was a value (removed)."""
     engine = create_engine(postgres_url)
     with engine.begin() as conn:
-        conn.execute(text(
-            "INSERT INTO provider_connections "
-            "(team_id, provider_type, display_name, base_url, "
-            " upstream_host, encrypted_api_key_ref, created_by) "
-            "VALUES (:t, 'openai-compatible', 'hr', 'https://x', "
-            "        'x', 'loom://ref', 'admin:0')",
-        ), {"t": team_id})
-        conn_id = conn.execute(text(
-            "SELECT id FROM provider_connections "
-            "WHERE team_id = :t AND display_name = 'hr'",
-        ), {"t": team_id}).scalar_one()
+        conn_id = _insert_connection(conn, team_id=team_id, display_name="hr")
 
     with engine.begin() as conn, pytest.raises(IntegrityError):
         conn.execute(text(

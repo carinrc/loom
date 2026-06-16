@@ -28,6 +28,12 @@ Three new tables for user-supplied LLM provider endpoints
 The Trial FK extension (Trial.provider_connection_id) is a separate
 column add not done in this migration; lands with the Phase 2 routes
 PR that uses it. Doing it here would couple two concerns.
+
+Postgres prerequisite: 13+ for built-in `gen_random_uuid()` in
+pg_catalog. All current managed offerings (RDS, Cloud SQL, AlloyDB)
+and self-hosted Postgres support this. The CI test container is
+`postgres:16`. Older Postgres would need the `pgcrypto` extension
+enabled.
 """
 
 from __future__ import annotations
@@ -65,12 +71,26 @@ def upgrade() -> None:
             "id",
             postgresql.UUID(as_uuid=True),
             primary_key=True,
-            server_default=sa.text("gen_random_uuid()"),
+            # Python-side default lives on the ORM model (default=uuid4),
+            # matching the convention used by Trial / LlmCall / etc.
+            # Raw-SQL callers (tests, future admin scripts) must supply
+            # the UUID explicitly; gen_random_uuid() server-default was
+            # removed in self-review for consistency with existing
+            # tables.
         ),
         sa.Column(
             "team_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("teams.id", ondelete="CASCADE"),
+            # RESTRICT (not CASCADE) so team-delete can't silently
+            # nuke provider connections that have in-flight or
+            # historical Trial FKs pointing at them. Operators must
+            # soft-delete connections (and let the future
+            # `loom admin providers purge` reclaim them after a
+            # quiet period) before deleting a team. The spec
+            # originally said CASCADE; the Trial FK conflict
+            # (no-cascade per spec) makes RESTRICT the right
+            # default.
+            sa.ForeignKey("teams.id", ondelete="RESTRICT"),
             nullable=False,
         ),
         sa.Column("provider_type", sa.Text(), nullable=False),
@@ -219,6 +239,12 @@ def upgrade() -> None:
             server_default=sa.text("true"),
         ),
         sa.Column("hidden_reason", sa.Text(), nullable=True),
+        # last_seen_at: defaults to now() on INSERT. Not auto-updated
+        # on UPDATE (unlike provider_connections.updated_at which has
+        # a trigger). The refresh code sets this explicitly when an
+        # upstream observation actually happened — not every UPDATE
+        # represents a fresh observation (operator hide/unhide does
+        # not touch this).
         sa.Column(
             "last_seen_at",
             postgresql.TIMESTAMP(timezone=True),

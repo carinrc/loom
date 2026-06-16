@@ -1216,6 +1216,7 @@ To run x86-only benchmarks on a mixed cluster: rack one x86 worker, label it `lo
 ## See also
 
 - [#49](https://github.com/carinrc/loom/issues/49) — Production cluster deployment with user-supplied model provider gateway
+- [cluster-deploy-spikes/](cluster-deploy-spikes/README.md) — **executable proofs** that this spec's load-bearing mechanisms (Docker bridges, hostPath/hostNetwork, hostPort routing) actually compose with the underlying primitives. CI gate; spec changes that propose new mechanisms must add a spike or accept review-only verification.
 - [service-mode.md](service-mode.md) — current single-host architecture
 - [drf-scheduling.md](drf-scheduling.md) — how the claim path matches workers to trials
 - [overview.md](overview.md)

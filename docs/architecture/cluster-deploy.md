@@ -1,6 +1,6 @@
 # Cluster deployment design
 
-**Status: design** (2026-06-15, revision 4). Tracking PR: [#50](https://github.com/carinrc/loom/pull/50). Supersedes inline guidance in `docs/architecture/service-mode.md`.
+**Status: design** (2026-06-15, revision 5). Tracking PR: [#50](https://github.com/carinrc/loom/pull/50). Supersedes inline guidance in `docs/architecture/service-mode.md`.
 
 Extends [#49](https://github.com/carinrc/loom/issues/49). Initial deployment target is 2–4× ASUS Ascent GX10 (ARM v9.2-A, GB10 Grace Blackwell, 128 GB unified, 4 TB local NVMe, 200 Gbps ConnectX-7), but **the design is not coupled to that hardware** — Loom is a platform; the deployment shape is selectable at deploy time.
 
@@ -82,16 +82,23 @@ Two verbs. Storage is an orthogonal flag.
 ### Topology diagram (cluster, embedded storage — your Ascent layout)
 
 ```
-┌────────── Control node (ascent-0, tainted) ──────────┐    ┌── Worker node × N ──────────────┐
-│  postgres   (StatefulSet, 1 replica, local PVC)       │    │  loom-worker (DaemonSet pod)    │
-│  minio      (StatefulSet, 1 replica, local PVC)       │    │  docker.sock (hostPath)         │
-│  loom-service / control-plane / llm-gateway / web     │    │  bench-cache  (hostPath, READ-  │
-│      (Deployments, ≥2 replicas, spread)               │ ←→ │    THROUGH cache of MinIO)      │
-│  loom-worker (DaemonSet pod)                          │200G│  trajectory-cache (hostPath,    │
-│      [DISABLED by default; --co-locate-              │bps │    WRITE-THROUGH to MinIO)      │
-│       workers-on-control to opt in]                   │    │                                 │
-│  ingress controller (nginx)                           │    │                                 │
-└───────────────────────────────────────────────────────┘    └─────────────────────────────────┘
+┌────────── Control node (ascent-0, tainted) ──────────┐    ┌── Worker node × N ──────────────────┐
+│  postgres   (StatefulSet, 1 replica, local PVC)       │    │  loom-worker (DaemonSet pod)        │
+│  minio      (StatefulSet, 1 replica, local PVC)       │    │  loom-llm-gateway-sandbox           │
+│  loom-service / control-plane / llm-gateway / web     │    │      (DaemonSet pod; joins per-     │
+│      (Deployments, ≥2 replicas, spread)               │ ←→ │       trial Docker bridges)         │
+│  loom-egress-proxy (Deployment, ≥2)                   │200G│  docker.sock (hostPath)             │
+│  loom-egress-xds   (Deployment, 1)                    │bps │  bench-cache (hostPath, read-       │
+│  loom-worker (DaemonSet pod)                          │    │      through cache of MinIO)        │
+│      [DISABLED by default; --co-locate-              │    │  trajectory-cache (hostPath,        │
+│       workers-on-control to opt in]                   │    │      write-through to MinIO)        │
+│  ingress controller (nginx)                           │    │                                     │
+└───────────────────────────────────────────────────────┘    └─────────────────────────────────────┘
+
+SPA (`loom-web`) is in the manifest set but the Deployment ships
+with `replicas: 0` for the cluster rollout — SPA development is
+paused per the project roadmap. Operators opt in via
+`kubectl scale deploy/loom-web --replicas=2` once SPA work resumes.
 ```
 
 **Key data invariant:** MinIO is the source-of-truth for benchmarks + trajectories. Per-node hostPaths are *caches*, not authoritative copies. If a worker node dies, its hostPath is gone — the data is intact in MinIO. This is the change from rev 1 of this spec, which incorrectly treated hostPath as canonical.
@@ -107,7 +114,14 @@ Two verbs. Storage is an orthogonal flag.
 
 **Write-through model for trajectories**: the `TrajectoryWriter` appends to a local file (low-latency for the agent loop) and flushes batches of events to MinIO via multipart upload every `LOOM_TRAJECTORY_FLUSH_INTERVAL_MS` (default 1000 ms). Each flush completes a part; the multipart upload is finalized on trial completion. Node failure mid-run loses at most one unflushed batch (~1 s worth of events); the rest is in MinIO and is recoverable via `mc complete-multipart-upload` from the operator runbook. Trajectory of any *completed* trial is fully in MinIO with no operator action required.
 
-**Read-through model for benchmarks**: worker checks `bench-cache/<slug>/<version>/.complete`; if missing, downloads from MinIO and atomically renames `.tmp` → final + writes the marker. Concurrent first-fetches: per-slug-version `flock(2)` prevents thundering herd (assumes local FS — current spec doesn't put bench-cache on NFS; if a future operator wants NFS-backed hostPath, they need a different lock or to disable shared caching). Eviction: LRU when `/var/lib/loom/benchmarks/` exceeds an operator-configurable quota (`LOOM_BENCH_CACHE_QUOTA_GB`, default 200). An **in-use registry** (`/var/lib/loom/benchmarks/.in-use/<slug>__<version>__<pid>` files written at trial start, removed at trial end) protects mounted slugs from eviction; the eviction loop groups by `<slug>__<version>` and skips any group with at least one live PID. Stale entries from killed workers are reaped on worker startup by walking `.in-use/`, calling `kill(pid, 0)` on each, and unlinking entries whose PID no longer exists. PID-based reap covers all worker shapes regardless of CWD.
+**Read-through model for benchmarks**: worker checks `bench-cache/<slug>/<version>/.complete`; if missing, downloads from MinIO and atomically renames `.tmp` → final + writes the marker. Concurrent first-fetches: per-slug-version `flock(2)` prevents thundering herd (assumes local FS — current spec doesn't put bench-cache on NFS; if a future operator wants NFS-backed hostPath, they need a different lock or to disable shared caching). Eviction: LRU when `/var/lib/loom/benchmarks/` exceeds an operator-configurable quota (`LOOM_BENCH_CACHE_QUOTA_GB`, default 200).
+
+**In-use registry + locking discipline (TOCTOU-safe).** `/var/lib/loom/benchmarks/.in-use/<slug>__<version>__<pid>` files; eviction loop groups by `<slug>__<version>` and skips any group with at least one live PID. The eviction loop and the trial-start path serialize through a shared `bench-cache/.lock/<slug>__<version>` flock:
+
+- **Trial start**: acquire flock on `.lock/<slug>__<version>` (shared/`LOCK_SH`); write `.in-use/<slug>__<version>__<pid>`; mount the cache dir into the sandbox; release flock.
+- **Eviction**: acquire flock (exclusive/`LOCK_EX`) on `.lock/<slug>__<version>`; check `.in-use/<slug>__<version>__*` for live PIDs (via `kill(pid, 0)`); if none, unlink the cache dir; release flock.
+
+The flock pair forces trial-start and eviction to interleave correctly: a trial mid-mount holds the shared lock; eviction blocks until the trial releases (i.e., until the in-use marker is on disk and visible). Stale in-use entries from SIGKILL'd workers are reaped on worker startup by walking `.in-use/`, calling `kill(pid, 0)` on each, and unlinking entries whose PID is gone.
 
 This is roughly the only sustainable model on a 4-box cluster: 16 benchmarks × potentially-multi-TB datasets would be brutal at 4× duplication, and shared NFS reintroduces locking quirks the spec rev 1 correctly rejected.
 
@@ -157,7 +171,7 @@ loom cluster {up,down,status}  --nodes HOSTFILE
     [--registry URL]                                                   # default: ghcr.io/carinrc
     [--ingress nginx|none] [--tls-cert PATH --tls-key PATH]
     [--co-locate-workers-on-control]                                   # opt-in; otherwise control node is tainted
-    [--allow-plaintext-etcd]                                           # default off; up refuses if etcd EncryptionConfiguration absent
+    [--etcd-encryption-attested | --allow-plaintext-etcd]              # one is required; see runbook for verification
     [--worker-concurrency N]                                           # default: CPU/RAM-derived (see Worker concurrency §)
 ```
 
@@ -224,7 +238,14 @@ loom eval batch create --provider prod --model gpt-4o \
 ]
 ```
 
-Each entry overrides the corresponding `loom eval batch create` flag for that combination. `provider_connection_id` / `provider_model_id` per entry allow cross-provider sweeps within one batch.
+Each entry overrides the corresponding `loom eval batch create` flag for that combination. `provider_connection_id` / `provider_model_id` per entry allow cross-provider sweeps within one batch. UUIDs come from `loom providers show NAME --format=id` or `loom providers list --format=json`.
+
+**First-time human login (no interactive paste):** users export the token once and reference it by env var, e.g.,
+```bash
+export LOOM_TOKEN="loom_admin_..."        # paste once into your shell rc / 1password CLI
+loom auth login --server https://loom.cluster.local --token env:LOOM_TOKEN
+```
+The literal-value rejection is deliberate (#21 review concern from rev 4): scripts can't typo their way into a hung-stdin; humans get a clear "missing required argument" error rather than a silent prompt; `ps`/history don't leak the token.
 
 `loom run` (existing, local-stateless) stays. The doc distinction:
 
@@ -353,81 +374,105 @@ The two-impl split clarifies "who encrypts what." User-provided API keys live in
 
 The security pivot. Trial sandbox containers are spawned by the worker via docker.sock onto a Docker bridge network — they are NOT k8s pods. Without explicit routing, a sandbox can dial the public internet directly via the Docker bridge → host → upstream, bypassing the gateway and the egress proxy.
 
-**Two design choices needed:** (a) sandbox network isolation, and (b) how the gateway authenticates the sandbox call.
+Two design choices are needed: (a) network isolation and (b) authentication. Rev 4 of this spec described a CONNECT-proxy + JWT-injection mechanism that doesn't compose (CONNECT proxies can't inject headers into TLS-encrypted upstream traffic; the `--internal` bridge and `--network container:` namespace sharing are mutually exclusive). Rev 5 ships **Path B — "gateway as base URL"** — which works with stock SDKs and avoids both bugs.
 
-#### (a) Sandbox network isolation: Docker `--internal` + connected gateway bridge
+#### (a) Network isolation: per-trial `--internal` bridge with gateway as the only reachable host
 
-Two ways to deny outbound from a sandbox; the doc commits to the simpler one:
+Worker at trial start:
 
-| Option | Mechanism | Pros | Cons |
-|---|---|---|---|
-| **Docker `--internal` bridge + dual-network connect** (chosen) | Sandbox container is attached to two networks: `sandbox-net` (`docker network create --internal`, no host route) and `sandbox-egress-<trial_id>` (a per-trial bridge connected only to the per-trial localhost forwarder). | No host iptables manipulation; no `CAP_NET_ADMIN` on the worker; Docker manages the rules. | Per-trial bridge create/destroy adds ~50 ms to trial setup. |
-| iptables rules on a shared sandbox bridge | Single shared bridge; worker installs per-container iptables rules at create time. | Slightly faster setup. | Requires `CAP_NET_ADMIN` on the worker pod (privilege escalation: a compromised worker can rewrite any host iptables rule). Documented as a non-trivial trust expansion. |
+1. `docker network create --driver bridge --internal sandbox-<trial_id>` — Docker primitive that produces a bridge with no default gateway. Containers on it cannot dial off-bridge.
+2. Connect the gateway's per-node "sandbox endpoint" container (`loom-llm-gateway-sandbox-<node>`, a DaemonSet pod that joins each trial bridge on demand) to the bridge. This pod is a thin TCP/TLS terminator that forwards into the cluster-internal `loom-llm-gateway` Service over the k8s network.
+3. Run the sandbox on `sandbox-<trial_id>` only. From the sandbox, the only reachable host is the sandbox-endpoint pod, on a fixed bridge-local IP (`172.30.0.2`, established by docker network's IPAM defaults).
+4. At trial end: disconnect the sandbox-endpoint from the bridge; `docker network rm sandbox-<trial_id>`.
 
-Phase 2 ships option 1. The `--internal` flag on Docker's bridge driver is a built-in primitive that does exactly what we need (containers on an `--internal` network have no default gateway). The per-trial `sandbox-egress-<trial_id>` network carries only the localhost forwarder (see below).
+No `CAP_NET_ADMIN`, no host iptables manipulation, no per-trial sidecar container. The sandbox-endpoint pod is the same one for all trials on a node (joins/leaves bridges on demand), so container count stays at O(nodes), not O(concurrent_trials).
 
-If a future need forces option 2, the worker DaemonSet's pod spec adds `securityContext.capabilities.add: [NET_ADMIN]` and a clear comment about the trust expansion.
+If `docker network connect` to a running pod proves operationally awkward, the alternative is one sandbox-endpoint container per trial (O(concurrent_trials) extra containers, ~10–20 MB Go binary each). Spec ships the per-node shared variant first; flag in the runbook if the join-on-demand pattern hits issues.
 
-#### (b) Sandbox→gateway authentication: per-trial localhost forwarder
+#### (b) Authentication: gateway-as-base-URL with step-JWT as API key
 
-`HTTPS_PROXY=https://jwt@gateway:port/` as a transport for a JWT does not work with stock provider SDKs. httpx-based SDKs (OpenAI, Anthropic) parse the userinfo as basic-auth, and the gateway today is a FastAPI HTTP service, not an HTTPS CONNECT forward proxy that understands `Proxy-Authorization`. Building a real authenticated forward proxy inside the gateway is multi-week work.
+Stock OpenAI/Anthropic/Google SDKs all support both:
+- `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` / `GOOGLE_GEMINI_BASE_URL` env vars (or constructor args) to redirect the SDK at a non-default endpoint.
+- API-key auth via `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` (passed in `Authorization: Bearer <key>` or `x-api-key: <key>` headers by the SDK).
 
-The shipped mechanism is a **per-trial localhost forwarder** (`loom-trial-fwd`, ~150 LOC Go binary, baked into the agent-runtime image):
+The gateway exposes upstream-compatible facade routes (`/v1/chat/completions` for OpenAI, `/anthropic/v1/messages` for Anthropic, `/google/...` for Gemini) and authenticates the inbound call by treating the API key as a step-scoped JWT. The worker injects into every sandbox:
+
+```
+OPENAI_BASE_URL    = https://172.30.0.2:8443/openai/v1
+ANTHROPIC_BASE_URL = https://172.30.0.2:8443/anthropic/v1
+GOOGLE_GEMINI_BASE_URL = https://172.30.0.2:8443/google/v1
+OPENAI_API_KEY     = <step-JWT>       # SDK puts this in Authorization: Bearer
+ANTHROPIC_API_KEY  = <step-JWT>       # SDK puts this in x-api-key
+GOOGLE_API_KEY     = <step-JWT>       # SDK puts this in Authorization
+# (172.30.0.2 = bridge-local IP of the sandbox-endpoint pod)
+```
+
+The sandbox-endpoint pod TLS-terminates with a per-cluster cert signed by the cluster's `loom-ca` (the same CA `loom cluster up` mints in §Network stack). The cert's SAN includes the bridge-local IPs (`172.30.0.2`, etc.) plus `loom-sandbox-gateway.local`. The agent-runtime base image trusts `loom-ca` via `/etc/ssl/certs/`, so stock SDKs validate normally.
 
 ```
 ┌─ sandbox container ─────────────────────┐
-│  env: HTTPS_PROXY=http://127.0.0.1:8443 │   stock SDKs (OpenAI, Anthropic, httpx) honor
-│  env: HTTP_PROXY=http://127.0.0.1:8443  │   HTTPS_PROXY; no SDK changes needed.
-│  loom-trial-fwd binary listens on       │
-│  127.0.0.1:8443 inside the sandbox      │   forwarder is on the sandbox-egress-<trial>
-│  net namespace                          │   bridge, NOT on the host net namespace.
+│  OPENAI_BASE_URL=https://172.30.0.2:    │   stock SDK (OpenAI, Anthropic, Google,
+│      8443/openai/v1                     │   httpx-based) honors *_BASE_URL + uses its
+│  OPENAI_API_KEY=<step-JWT>              │   *_API_KEY in headers. No SDK changes.
+│                                         │   No HTTPS_PROXY needed.
+│  agent runs OpenAI/Anthropic/etc SDK    │
+│  → dials https://172.30.0.2:8443        │
 └────────────────┬────────────────────────┘
-                 │ HTTPS CONNECT  +  Authorization: Bearer <step-JWT>
-                 │  (forwarder injects the JWT header per request)
+                 │ HTTPS (TLS cert validates via loom-ca)
+                 ▼
+┌─ loom-llm-gateway-sandbox-<node>        │   per-node TCP/TLS terminator. Validates
+│  (DaemonSet pod on each worker)         │   step-JWT, looks up provider_connection_id,
+│  joins each trial bridge on demand      │   forwards the body to the main gateway over
+└────────────────┬────────────────────────┘   k8s Service network.
+                 │ HTTP over k8s Service network (NetworkPolicy-confined)
                  ▼
 ┌─ loom-llm-gateway (k8s Service) ────────┐
-│  validates step JWT, resolves           │   gateway is the trust boundary: decrypts API
-│  provider_connection_id, decrypts API   │   key, knows team_id, can rate-limit per team.
-│  key, dials provider via egress proxy   │
+│  resolves connection, decrypts API key, │   trust boundary: knows team_id, applies
+│  rate-limits, calls upstream via egress │   per-team rate, records usage.
+│  proxy                                  │
 └────────────────┬────────────────────────┘
-                 │ HTTPS CONNECT
+                 │ HTTPS CONNECT to (target_ip, 443) with sidecar
+                 │   header X-Loom-Connection-Id: <uuid>
                  ▼
 ┌─ loom-egress-proxy (k8s Service) ───────┐
-│  Envoy with per-conn IP allowlist       │   enforces destination IP ∈ resolved_egress_ips
-│  matched on TLS SNI                     │   for the requested base_url host.
+│  Envoy. Validates target_ip ∈ resolved_ │   second wall: even if gateway is compromised,
+│  egress_ips[connection_id]. Per-team    │   it can only dial IPs the operator's connection
+│  rate.                                  │   resolved to.
 └────────────────┬────────────────────────┘
-                 │ HTTPS to provider
+                 │ HTTPS to provider IP
                  ▼
-            OpenAI / Anthropic / …
+            OpenAI / Anthropic / Google
 ```
 
-What the worker does at trial start:
+What's different vs Path A (CONNECT proxy + injection):
 
-1. Create `sandbox-egress-<trial_id>` Docker bridge.
-2. Create `sandbox-<trial_id>` `--internal` bridge.
-3. Spawn the `loom-trial-fwd` helper container on the egress bridge, listening on `127.0.0.1:8443` *inside that bridge's net namespace* — actually, on a small dedicated container attached to both the egress bridge and the sandbox bridge, so the sandbox sees `127.0.0.1:8443` via a shared net namespace (`--network container:loom-trial-fwd-<trial_id>` on the sandbox).
-4. Inject `HTTPS_PROXY` / `HTTP_PROXY` env vars + the step-JWT into the forwarder's config (the JWT lives only in the forwarder's memory; never in the sandbox env).
-5. On trial completion: tear down both bridges and the forwarder container.
+- **No TLS interception.** The sandbox terminates TLS at the gateway (legitimately — the gateway IS the endpoint as far as the SDK is concerned). No per-trial CA bootstrap, no MITM.
+- **No header injection during CONNECT.** The SDK's `Authorization` / `x-api-key` header carries the JWT to the gateway in plain HTTP (decrypted at the TLS terminator). Standard SDK paths.
+- **JWT lifetime + refresh.** Step JWT lifetime = 1 h (covers ~95% of step durations). For longer steps, the worker re-mints via control-plane and updates the sandbox env via `docker exec` of the agent-runtime helper that re-reads env from a tmpfs-mounted file. JWT issuer is control-plane; verifier is the gateway; signing key in `k8s-secret`.
+- **Limits:** doesn't catch agents that bypass `*_BASE_URL` and hard-code provider URLs (e.g., test fixtures). Those calls would dial `api.openai.com` and hit the `--internal` bridge's "no route to host" — they fail closed. The agent author has to fix their SDK config; logging on the bridge surfaces this as `connect: network is unreachable` in the trial trajectory.
 
-The step JWT carries `(trial_id, team_id, provider_connection_id, step_id)`, signed by control-plane at step start, verified by gateway. The forwarder is the only entity that sees it; the agent never does. A malicious agent reading `HTTPS_PROXY` learns only `http://127.0.0.1:8443` — useless outside the sandbox.
+Four layers of defense (any single one closes the path if the others fail):
 
-Three layers of defense; any one closes the path if the others fail:
+1. **`--internal` sandbox bridge** — no host route, so direct dial to upstream IPs fails.
+2. **Per-cluster TLS cert** — only the loom sandbox-endpoint validates as the SDK's target; rogue endpoints fail validation.
+3. **Step-JWT authentication at the gateway** — anonymous calls rejected; per-trial scope.
+4. **Egress proxy IP allowlist** — even with a compromised gateway, only IPs in `resolved_egress_ips[connection_id]` are dialed.
 
-1. `--internal` sandbox bridge: no host route → no direct dial.
-2. Forwarder injects JWT: gateway authenticates → no anonymous calls.
-3. Egress proxy IP allowlist: gateway forwards only to known provider IPs → no SSRF.
+The egress proxy's role is **destination IP enforcement, scoped by connection_id**, and per-team rate-limiting. The gateway passes `(target_ip, X-Loom-Connection-Id)`; the proxy verifies `target_ip ∈ resolved_egress_ips` for that connection. No DNS at the proxy.
 
-The egress proxy's role is **destination IP enforcement and per-team rate-limiting**, not authentication. Authentication lives at the gateway; the egress proxy is the second wall.
+#### Path A (CONNECT proxy + TLS interception) — deferred
+
+Path A — sandbox uses `HTTPS_PROXY` to a per-trial forwarder that MITMs HTTPS via per-trial CA and re-emits to the gateway — works but costs ~500–800 LOC + per-trial CA bootstrap + cert-trust injection into the sandbox image. Not shipped Phase 2; reconsidered if a future need wants TLS-transparent proxying (e.g., third-party SDKs that don't honor `*_BASE_URL`).
 
 ### `resolved_egress_ips` re-resolution
 
 Provider IP behavior is bimodal:
-- **Anycast-fronted providers** (most CloudFlare/Fastly-routed APIs): the same IP (or small set) serves traffic forever; routing changes happen at the network layer, invisible to DNS. Re-resolution returns stable data; the allowlist is effectively static.
-- **ELB-fronted providers** (some Anthropic regions, vLLM behind ALB, OpenRouter mirrors): IPs rotate with the LB pool. Allowlist must track the union over a rolling window.
+- **Anycast-fronted providers** (most CloudFlare/Fastly-routed APIs): the same IP (or small set) serves traffic stably on the day-scale; the Anycast pool does rotate, but typically over weeks. The 24-hour union window covers normal churn comfortably.
+- **ELB-fronted providers** (some Anthropic regions, vLLM behind ALB, OpenRouter mirrors): IPs rotate with the LB pool, often hourly. Allowlist must track the union over a rolling window.
 
 The re-resolver handles both via "union with bounded last-seen window":
 
-- **Singleton runner**: re-resolver runs as a Postgres-advisory-lock-protected task on whichever gateway replica acquires `pg_try_advisory_lock(hashtext('egress_resolver_v1'))`. Non-leader replicas skip the tick. Lock released on shutdown; another replica takes over within one tick. This eliminates the multi-replica write race.
+- **Singleton runner**: re-resolver runs as a Postgres-advisory-lock-protected task on whichever gateway replica acquires `pg_try_advisory_lock(hashtext('egress_resolver_v1'))`. Non-leader replicas skip the tick. Lock released on shutdown; another replica takes over within one tick. The resolver's pg connection sets `tcp_keepalives_idle = 30, tcp_keepalives_interval = 5, tcp_keepalives_count = 3` so Postgres detects a SIGKILL'd holder within ~45 s (rather than the Linux 2-hour TCP default). Without short keepalives a dead leader's lock could block all resolution for hours.
 - **Tick budget + jitter**: each tick resolves up to 32 connections (configurable: `LOOM_EGRESS_RESOLVE_BUDGET_PER_TICK`). On cold start, hash(connection_id) % tick_count distributes the initial fan-out across `egress_ips_min_ttl_seconds` worth of ticks instead of slamming DNS in a single second.
 - **TTL**: per-connection re-resolve interval = `max(observed_dns_ttl, egress_ips_min_ttl_seconds)`. The `min_ttl_seconds` column is a FLOOR — operator can require a slow refresh on shaky DNS but not faster than the upstream TTL allows.
 - **Union semantics**: new union = (current ∪ newly resolved); each IP carries a `last_seen` in a sidecar `egress_ip_last_seen JSONB` column. **Bounded retention**: drop IPs older than `egress_ip_window_hours` (default 24, configurable). **Hard cap**: 256 IPs per connection; if the rolling union exceeds 256, evict by `last_seen` ascending. Without the cap, a provider rotating IPs minutely produces an unbounded array.
@@ -436,29 +481,27 @@ The re-resolver handles both via "union with bounded last-seen window":
 
 This keeps valid providers reachable across IP churn and still defeats DNS rebinding (rebinding an attacker-controlled host produces an IP NOT in the union; rejected at the egress proxy).
 
-### SSRF defense: layered
+### SSRF defense: the four layers, summarized
 
-The previous spec's allowlist-only defense (RFC1918 + link-local at validation) is insufficient (IPv6 ULA, IPv6 link-local, `0.0.0.0`, `[::]`, DNS rebinding bypass it). The shipped defense, in layers:
+Same four layers as the Sandbox→gateway § lists; this section gives the validation-time mechanism (one of those four) more detail.
 
-1. **Sandbox network isolation** (above): sandbox can't reach anywhere except the gateway. Defeats agent-driven SSRF entirely if (2)–(4) fail.
-2. **`POST /provider-connections` validation**: resolve `base_url`, validate every resolved address is non-private (IPv4 RFC1918 + loopback + link-local; IPv6 loopback `::1` + link-local `fe80::/10` + ULA `fc00::/7`; `0.0.0.0`, `[::]`, `0.0.0.0/8`), store the resolved IPs.
-3. **Egress proxy IP allowlist** (above): destination IP must match the connection's `resolved_egress_ips` *at call time*.
-4. **TLS SNI match**: the egress proxy requires SNI to match `upstream_host`; defeats IP-allowlist bypass via host-header confusion against a shared LB.
+1. `--internal` sandbox bridge (per Sandbox→gateway §).
+2. Step-JWT authentication at the gateway (per Sandbox→gateway §).
+3. **`POST /provider-connections` validation** (this layer): resolve `base_url`, classify each resolved address. By default, RFC1918 + IPv6 ULA (`fc00::/7`) + IPv6 link-local (`fe80::/10`) + IPv4 link-local + loopback + `0.0.0.0`, `[::]`, `0.0.0.0/8` are rejected as obvious SSRF targets. **On-prem providers** (vLLM in the lab, hosted Llama, etc.) are a legitimate use case on the Ascent target — the cluster IS the model host. Opt-in via the team setting `provider_connections.allow_private_endpoints = true` (admin-only flag, `loom admin teams set --team T --allow-private-endpoints true`). When on, RFC1918 / ULA are permitted; loopback, link-local, and `0.0.0.0` stay rejected (those are never legitimate provider hosts).
+4. **Egress proxy IP allowlist** (per Sandbox→gateway §): destination IP must match the connection's `resolved_egress_ips`, scoped by `connection_id` passed in the `X-Loom-Connection-Id` header.
 
-Layers (1) and (3) are the load-bearing ones. (2) is a UX layer (reject obvious mistakes at create time). (4) is defense-in-depth.
+Layers (1) and (4) are the load-bearing ones. (3) is a UX layer at create time. (2) is a trust-boundary check (only authenticated trial calls reach the egress proxy).
 
 ### Cache + config update durability (multi-replica)
 
-Three caches matter: Gateway's decrypted-key LRU (≥2 gateway replicas), egress-proxy's IP-allowlist (≥2 egress replicas), and gateway's provider-connection metadata cache (same replica set). All must agree quickly when a user PATCHes a connection or rotates credentials.
+Three caches matter: gateway's decrypted-key LRU (≥2 gateway replicas), egress-proxy's per-connection IP allowlist (≥2 egress replicas), and gateway's provider-connection metadata cache (same replica set). All must agree quickly when a user PATCHes a connection, rotates credentials, or the re-resolver writes new IPs.
 
-The shipped pattern:
+- **Cache key includes `provider_connections.updated_at`.** Every gateway call does a cheap indexed `SELECT id, updated_at FROM provider_connections WHERE id = $1` (single PK lookup, ~100 µs p99). If `updated_at` matches the cache entry, hit; otherwise miss → fetch + decrypt → repopulate. Stale cache is impossible regardless of pubsub reliability; the only cost is the indexed lookup per call.
+- **NOTIFY is the optimization layer.** Gateway and egress-proxy subscribe to `provider_connections_changed` and `provider_egress_changed`. On NOTIFY each replica invalidates proactively, eliminating the one-call window where another replica wrote and this one still cached.
+- **NOTIFY-loss recovery.** Each replica polls `SELECT max(updated_at) FROM provider_connections` every 30 s. If max advanced past the local NOTIFY cursor, force-invalidate the whole cache.
+- **Egress proxy: pushed allowlist via xDS.** The `loom-egress-xds` deployment reads Postgres (NOTIFY + 30 s poll) and serves Envoy a CDS/EDS config that includes a per-connection cluster keyed by `connection_id`, with `resolved_egress_ips` as the EDS endpoint list. At call time the gateway passes `X-Loom-Connection-Id` in the CONNECT request; Envoy routes to the matching cluster and rejects `target_ip` if it's not in that cluster's endpoint list. No DNS at the proxy; the gateway resolves once and the proxy enforces the union from the allowlist. The "no DNS at proxy" and "proxy enforces allowlist" facts are complementary, not contradictory — the DNS work is bookkeeping (which IPs are valid), the enforcement is "is the IP the gateway picked actually in that set."
 
-- **Cache key includes `provider_connections.updated_at`**. Every Gateway call does a cheap indexed `SELECT id, updated_at FROM provider_connections WHERE id = $1` (single primary-key lookup, ~100 µs at p99). If `updated_at` matches the cache entry's, hit; otherwise miss → DB fetch + decrypt → repopulate. This makes stale-cache impossible regardless of pubsub reliability; the only cost is the indexed lookup per call.
-- **NOTIFY is an optimization, not the correctness layer**. Gateway and egress-proxy both subscribe to `provider_connections_changed` and `provider_egress_changed`. On NOTIFY they invalidate proactively (eliminates the one-call window where another replica writes and this one still has the cached value).
-- **NOTIFY connection loss recovery**: a separate goroutine/task on each replica polls `SELECT max(updated_at) FROM provider_connections` every 30 s. If max moved more than the local NOTIFY cursor expects, force-invalidate the whole cache. Belt-and-suspenders for LISTEN's well-known fragility.
-- **Egress proxy reload**: Envoy reloads its IP-allowlist via xDS (an in-process control server reads Postgres on NOTIFY + every 30 s polling, serves EDS endpoints to Envoy). No SIGHUP, no restart. Latency: NOTIFY-driven update p99 < 500 ms; polling-driven update p99 < 30 s. Documented in runbook.
-
-This is more moving parts than rev 2's "in-process pubsub + 10-min TTL" but it's correct under partition. The 10-min TTL is removed: TTL is "until `updated_at` changes."
+NOTIFY-driven cache flush p99 < 500 ms across replicas; polling-driven p99 < 30 s. Both documented in the runbook.
 
 ### Gateway hot-path latency
 
@@ -476,7 +519,7 @@ User-supplied endpoints don't have a Loom-maintained rate card. Three modes via 
 | `tokens-only` | Record `input_tokens` + `output_tokens` + `provider_connection_id`; leave `cost_usd = NULL`. SPA/CLI display tokens, no dollars. |
 | `operator-supplied` | Use `provider_connections.pricing_data` (`{input_usd_per_1m, output_usd_per_1m}`). Operator sets at create/update. |
 
-**`provider_type = 'openai-compatible'` defaults to `tokens-only`**, never to `rate-card` — the URL-based "is this the canonical OpenAI endpoint?" heuristic is brittle (proxies, VPC endpoints, mirrors all break it). Operator opt-in to `operator-supplied` via `--input-usd-per-1m`/`--output-usd-per-1m` for endpoints with known pricing. This is the single cost source rule reversed from rev 2.
+**`provider_type = 'openai-compatible'` defaults to `tokens-only`**, never to `rate-card` — the URL-based "is this the canonical OpenAI endpoint?" heuristic is brittle (proxies, VPC endpoints, mirrors all break it). Operator opts in to `operator-supplied` via `--input-usd-per-1m`/`--output-usd-per-1m` for endpoints with known pricing.
 
 `provider_type = 'custom'` is `tokens-only` only (no rate-card lookup attempted).
 
@@ -489,7 +532,7 @@ User-supplied endpoints don't have a Loom-maintained rate card. Three modes via 
 | `loom providers models NAME --refresh` | Synchronous refresh. |
 | Background refresh detects model gone | `upstream_present = false`, `hidden_reason = "missing-upstream"`. NOT deleted (audit trail). Re-appearing model flips back. |
 | `loom providers models NAME --hide MODEL` | `visible = false`, `hidden_reason = "operator-hidden"`. |
-| Refresh fails (network error) | Cache untouched. `last_validation_error` set. Surfaced in `loom providers show`. |
+| Refresh fails (network error) | Cache rows untouched. `provider_connections.last_validation_error` set (NOT a column on `provider_models_cache`). Surfaced in `loom providers show`. |
 
 Models marked `upstream_present=false AND visible=true` show in CLI with a `(missing upstream)` annotation but can still be selected (some providers de-list and re-list models without behavior changes).
 
@@ -520,23 +563,24 @@ Implementation lives in PR per Phase 3. Decisions:
 
 - **`worker.yaml`**: Deployment → DaemonSet, one pod per node, `LOOM_WORKER_CONCURRENCY` from ConfigMap. Volume mounts: `docker.sock` (hostPath), `bench-cache` (hostPath, read-through cache only), `trajectory-cache` (hostPath, write-through to MinIO). No `--privileged` and no `CAP_NET_ADMIN` (sandbox isolation uses Docker `--internal` bridges; no host iptables manipulation needed — see Sandbox→gateway §). Worker runs as `loom` user; docker.sock gid is read at startup (`stat -c %g /var/run/docker.sock`) and the worker process is re-`setgid`ed before opening the socket, so hosts with non-default docker group gids (Ubuntu 999 vs RHEL varies, CRI-O hosts have different shapes) work without manifest changes. Honest framing: docker.sock access is functionally root-equivalent on the host; this is the same security tradeoff as today's single-box mode. AppArmor/SELinux profiles can mitigate (not shipped Phase 3).
 - **Control node taint**: `loom cluster up` taints the control node with `loom.io/role=control:NoSchedule`. Worker DaemonSet pods don't tolerate this taint by default. `--co-locate-workers-on-control` flag adds the toleration (degrades on small clusters; documented tradeoff). Postgres+MinIO StatefulSets get the toleration + a `nodeSelector: loom.io/role=control` so they pin to the tainted node.
-- **`postgres.yaml`, `minio.yaml`**: keep `replicas: 1`. Add nodeSelector + toleration. Ship `backup-cronjob.yaml` that `pg_dump`s + `mc mirror`s to `s3://<external-bucket>/backups/...`. **Backup target is required external** — `loom cluster up --backup-target s3://...` enables the CronJob; without it the CronJob is templated but disabled. Writing backups to the embedded MinIO is refused with a clear error (same-disk backup doesn't survive control node failure). MinIO bucket has `LifecycleConfiguration: AbortIncompleteMultipartUpload after 1 day` so crashed trajectory uploads don't accumulate storage indefinitely.
+- **`postgres.yaml`, `minio.yaml`**: keep `replicas: 1`. Add nodeSelector + toleration. Ship `backup-cronjob.yaml` that `pg_dump`s + `mc mirror`s to `s3://<external-bucket>/backups/...`. **Backup target is required external** — `loom cluster up --backup-target s3://...` enables the CronJob; without it the CronJob is templated but disabled. Writing backups to the embedded MinIO is refused with a clear error (same-disk backup doesn't survive control node failure). MinIO bucket lifecycle: `AbortIncompleteMultipartUpload after 7 days` (covers SWE-Bench-class long trials; rev 4's 1-day window would have cancelled active uploads mid-run). Applies to non-trajectory prefixes; the `trajectories/` prefix has `AbortIncompleteMultipartUpload after 14 days` to give long-running agent loops headroom.
 - **`bootstrap-job.yaml`**: one-shot Job. `python -m loom_service.bootstrap` runs `alembic upgrade head`, checks if admin token exists, mints if not. **Output mechanism**: tokens written to stdout (visible via `kubectl logs job/loom-bootstrap`); `loom cluster up` watches the Job, captures stdout, prints to operator, then `kubectl delete job/loom-bootstrap` (Job logs purged automatically). No k8s Secret involved — no etcd plaintext leak. Re-running bootstrap on an already-bootstrapped cluster is a no-op (token rotation is a separate verb, see below).
-- **etcd encryption pre-flight**: `loom cluster up` probes the cluster's `EncryptionConfiguration` (via `kubectl get --raw /api/v1/configz` or by attempting an apiserver-internal check). If absent and `--allow-plaintext-etcd` not set, refuse to start with a clear error. Why: `k8s-secret` impl holds the master key + Postgres + MinIO creds in etcd; without encryption-at-rest, an etcd snapshot = full Loom takeover. Default-fail is the safer posture; the flag is the dev/lab escape hatch.
+- **etcd encryption pre-flight (attestation, not a check)**: there's no portable kubectl-level introspection for EncryptionConfiguration on most distros (kubeadm hides it on the apiserver process; k3s doesn't expose it). `loom cluster up` requires either `--etcd-encryption-attested` (operator confirms they've followed the runbook's verification steps) or `--allow-plaintext-etcd` (explicit dev/lab opt-out). Without one of those two flags, `loom cluster up` refuses with a runbook link explaining how to verify (steps: dump a known secret via etcdctl + check the value starts with `k8s:enc:aescbc:`). The verification is the operator's responsibility; default-fail is the safer posture, but we don't claim a check we can't deliver portably.
 - **`loom-service`, `control-plane`, `llm-gateway`, `web`**: keep ≥2 replicas, add `topologySpreadConstraints` so they spread across nodes.
-- **`egress-proxy.yaml`**: new. Deployment, ≥2 replicas in cluster mode (single container in single-box compose). Envoy + a dedicated `loom-egress-xds` sidecar. **xDS server impl: vendored from [`envoyproxy/python-control-plane`](https://github.com/envoyproxy/python-control-plane) (the in-tree Python reference), NOT built from scratch.** The sidecar reads `provider_connections` from Postgres (subscribes to both `provider_connections_changed` and `provider_egress_changed`; 30 s polling fallback) and serves CDS/EDS endpoints to Envoy. Effort budget: ~3 days (configuration only; no protocol work). **Egress proxy resolves no DNS itself** — gateway passes the destination IP directly in the CONNECT target (e.g., `CONNECT 1.2.3.4:443` with SNI `api.openai.com`). Removes a whole class of failure modes and the need for a DNS allow-rule on the proxy's NetworkPolicy.
+- **`egress-proxy.yaml` + `egress-xds.yaml`**: two Deployments, NOT one pod-with-sidecar. `egress-proxy` is Envoy, ≥2 replicas. `egress-xds` is the control plane, 1 replica (its state is Postgres so HA isn't critical, and Envoy survives xDS disconnects). **xDS server impl: vendored from [`envoyproxy/python-control-plane`](https://github.com/envoyproxy/python-control-plane) (in-tree Python reference), NOT built from scratch.** xds reads `provider_connections` from Postgres (NOTIFY on `provider_connections_changed` + `provider_egress_changed`; 30 s poll fallback) and serves CDS/EDS to Envoy over gRPC. Effort budget: ~3 days (config only; no protocol work). Egress proxy resolves no DNS itself — gateway passes target IP + `X-Loom-Connection-Id`; Envoy looks up the per-connection cluster in its EDS-pushed state and accepts/rejects accordingly. The split-into-two-Deployments choice keeps NetworkPolicy tight: xds reaches Postgres + DNS only (narrow blast radius); egress proxy reaches `0.0.0.0/0:443` + xds:18000 (gRPC) only. Sidecar-in-same-pod would have inherited the proxy's `0.0.0.0/0:443` allow on the xds container — overbroad.
 - **Egress proxy replica count differs by deployment mode**:
   - `loom cluster` (k8s): Deployment, ≥2 replicas, `topologySpreadConstraints` across worker nodes.
   - `loom service` (compose): single container alongside the gateway.
   - Both modes expose port 8443 (HTTPS CONNECT). Gateway dials it via service DNS in cluster mode, `loom-egress-proxy:8443` in compose.
 - **Compose service definition** (deliverable in Phase 2): `docker/compose.yaml` gains a `loom-egress-proxy` service. `LOOM_EGRESS_PROXY_DISABLE=1` removes it from the active profile and falls back to the gateway making direct outbound calls (single-box dev convenience; documented as a security regression in the comment block above the env var).
 - **Network policies** (k8s mode), all default-DENY + explicit allow:
-  - `loom-worker` pod → `loom-llm-gateway:9100`, `loom-control-plane:8080`, kube-dns UDP/53.
-  - `loom-llm-gateway` → `loom-egress-proxy:8443`, `postgres:5432`, kube-dns UDP/53 (gateway does the IP resolution before the egress proxy CONNECT).
-  - `loom-egress-proxy` → `0.0.0.0/0:443` (TCP only). No DNS needed — destination IPs come from the gateway in the CONNECT target.
-  - `loom-egress-xds` (sidecar) → `postgres:5432`, kube-dns UDP/53.
+  - `loom-worker` pod → `loom-llm-gateway-sandbox:8443`, `loom-llm-gateway:9100`, `loom-control-plane:8080`, kube-dns UDP/53.
+  - `loom-llm-gateway-sandbox` (DaemonSet) → `loom-llm-gateway:9100`, kube-dns UDP/53. Cannot reach Postgres or the egress proxy directly.
+  - `loom-llm-gateway` → `loom-egress-proxy:8443`, `postgres:5432`, kube-dns UDP/53 (gateway does the upstream IP resolution before the egress proxy CONNECT).
+  - `loom-egress-proxy` → `loom-egress-xds:18000` (xDS gRPC), `0.0.0.0/0:443` (TCP only). No DNS needed.
+  - `loom-egress-xds` → `postgres:5432`, kube-dns UDP/53. Cannot reach the internet.
   - All other pods → kube-dns UDP/53 + their explicit deps.
-  - **Sandbox container egress is NOT enforced by k8s NetworkPolicy.** Sandboxes are docker.sock-spawned bridge containers, outside the k8s network plane. Their egress is enforced by the Docker `--internal` bridge + the per-trial localhost forwarder (see Sandbox→gateway §). A malicious agent ignoring `HTTPS_PROXY` has no host route — no destination is reachable except through the forwarder.
+  - **Sandbox container egress is NOT enforced by k8s NetworkPolicy** (sandboxes are docker.sock-spawned bridge containers, outside the k8s network plane). Their egress is enforced by the per-trial Docker `--internal` bridge: the only reachable host is `loom-llm-gateway-sandbox` joined to the bridge. The `loom-llm-gateway-sandbox` DaemonSet's k8s NetworkPolicy forbids it from reaching anywhere except the in-cluster gateway, so even if the sandbox tunneled a malicious payload through the SDK API surface, it cannot reach the public internet directly from the sandbox-endpoint pod.
 
 ### Token rotation (separate from bootstrap)
 
@@ -565,7 +609,7 @@ Confirmed `_up` at `src/loom_cli/service_cmd.py:172` with `_write_env_tokens` at
 docker compose ... up -d --force-recreate --no-deps worker
 ```
 
-so worker reads the fresh `LOOM_WORKER_TOKEN`. `docker restart` reuses old env; only `up --force-recreate` re-reads `.env`. Skippable with `--no-recreate-worker` for power users.
+so worker reads the fresh `LOOM_WORKER_TOKEN`. `docker restart` reuses old env; only `up --force-recreate` re-reads `.env`. The recreate is always-on — rev 3 documented a `--no-recreate-worker` opt-out but there's no legitimate reason to keep the worker holding a stale token, so the flag is dropped.
 
 ## Multi-tenancy boundaries
 
@@ -652,11 +696,17 @@ CLI:
 - `src/loom_cli/{auth,providers,eval}_cmd.py`.
 - All secret-bearing flags reject literal values at argparse-time; accept only `env:`, `file:`, `-`.
 
-Sandbox network isolation + per-trial forwarder:
-- `cmd/loom-trial-fwd/main.go` (~150 LOC): listens on `127.0.0.1:8443`, forwards to gateway with injected `Authorization: Bearer <step-JWT>`. Compiled into the agent-runtime image.
-- Worker change in `src/loom_worker/sandbox.py`: at trial start, `docker network create --internal sandbox-<trial>` + `docker network create sandbox-egress-<trial>`; spawn forwarder container on the egress bridge; attach sandbox to `--internal` bridge and share the forwarder's net namespace. Inject `HTTPS_PROXY=http://127.0.0.1:8443` into sandbox env. Tear down at trial end.
+Sandbox network isolation + gateway-as-base-URL (rev 5 design, supersedes rev 4 forwarder):
+- New DaemonSet `loom-llm-gateway-sandbox` (~250 LOC Go binary): per-node TLS terminator that joins per-trial Docker bridges on demand, validates the inbound step-JWT, forwards into the in-cluster `loom-llm-gateway` Service. Image baked at Phase 1.
+- Gateway facade routes (`/openai/v1/...`, `/anthropic/v1/...`, `/google/v1/...`) that mirror upstream API surfaces. Each route reads the inbound key header (`Authorization: Bearer` for OpenAI/Google, `x-api-key` for Anthropic) as a step-JWT, validates, looks up `provider_connection_id`, decrypts the real API key, makes the upstream call.
+- Step JWT lifetime: 3600 s (covers ~95% of step durations). Worker re-mints via `POST /api/v1/trials/{id}/steps/{id}/sandbox-jwt` and updates the sandbox env via a tmpfs-mounted file the agent-runtime helper rereads. Signing key in `k8s-secret`.
+- Worker change in `src/loom_worker/sandbox.py`: at trial start, `docker network create --driver bridge --internal sandbox-<trial>`; `docker network connect sandbox-<trial> loom-llm-gateway-sandbox-<node>`; create sandbox container with `--network sandbox-<trial>` + `*_BASE_URL` + `*_API_KEY=<step-JWT>` env vars. Tear down at trial end.
 - Worker reads `docker.sock` gid at startup (`stat -c %g /var/run/docker.sock`), re-setgids before opening the socket — no manifest changes for hosts with non-default docker gid.
-- Tested with a synthetic agent that ignores `HTTPS_PROXY` and tries `socket.connect("api.openai.com", 443)` — must fail with "no route to host" because the sandbox is on a `--internal` bridge.
+- Tests:
+  - Synthetic agent that hard-codes `https://api.openai.com/v1/chat/completions` (ignores `OPENAI_BASE_URL`) — must fail closed with "no route to host" via the `--internal` bridge.
+  - Synthetic agent that uses `OPENAI_BASE_URL` but presents an invalid JWT — gateway facade returns 401.
+  - Stock OpenAI SDK against the facade — full round-trip via egress proxy, usage recorded.
+- HTTP/3 + QUIC: future SDKs may prefer UDP-based transport that does not honor `*_BASE_URL` proxying semantics. The current design assumes HTTP/1.1+TLS over TCP, which matches all stable SDKs as of 2026-06. If an SDK ships HTTP/3-only support, the `*_BASE_URL` redirect still works (the SDK dials our endpoint, not the provider's), but DNS resolution of `loom-llm-gateway-sandbox` on the `--internal` bridge needs static config — covered by the bridge IPAM defaults.
 
 Behavior:
 - Cost-source 3-way mode (`rate-card` only for anthropic/google; `tokens-only` default for openai-compatible/custom).
@@ -706,7 +756,9 @@ Depends on Phase 1 (ARM images) and Phase 2 (CLI surface so the cluster is actua
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| Sandbox container bypasses gateway and dials providers directly | HIGH | Three layers: Docker `--internal` sandbox bridge (no host route), per-trial localhost forwarder (injects step-JWT), egress proxy IP allowlist. Phase 2 ships an explicit bypass test (synthetic agent ignoring `HTTPS_PROXY` + raw socket connect to provider host). |
+| Sandbox container bypasses gateway and dials providers directly | HIGH | Four layers: Docker `--internal` sandbox bridge (no host route), per-cluster TLS cert (only loom-sandbox-endpoint validates), step-JWT auth at gateway, egress proxy per-connection IP allowlist. Phase 2 ships explicit bypass tests (hardcoded URL + invalid JWT). |
+| Agent hardcodes provider URL and ignores `*_BASE_URL` | MEDIUM | Fails closed at the `--internal` bridge ("no route to host"). Surfaced in trial trajectory as a connection error so the agent author can fix their SDK config. |
+| etcd attestation flag misused (operator claims attested without actually verifying) | MEDIUM | Honest design: we cannot reliably check; we require the operator to take responsibility via an explicit flag. Runbook spells out the etcdctl verification. Compensating control: any operator capable of running `kubectl apply` against a cluster also has the etcd access to verify, so this is socially enforced. |
 | `docker.sock` access on worker is root-equivalent on host | MEDIUM | Same tradeoff as today's single-box mode; documented honestly. AppArmor/SELinux profiles + future user-namespaced Docker mitigate (not shipped Phase 3). Risk is the worker container, not the sandbox — the sandbox does NOT mount docker.sock. |
 | etcd plaintext leaks master key + bootstrap creds | HIGH | `loom cluster up` refuses without `EncryptionConfiguration` unless `--allow-plaintext-etcd` set. Default-secure; opt-out for dev/lab. |
 | Bench-cache backup writes go to embedded MinIO and don't survive control-node failure | MEDIUM | Backup CronJob refuses to target the embedded MinIO; `--backup-target s3://external` required to enable. Runbook documents the offsite-only invariant. |
@@ -796,6 +848,29 @@ To run x86-only benchmarks on a mixed cluster: rack one x86 worker, label it `lo
 
 ## Changelog
 
+- **2026-06-15 rev 5**: Addresses 22 PR #50 review-of-rev-4 concerns. Blockers (1–4), material (5–12), smaller (13–22):
+  1. **Sandbox→gateway mechanism redesigned (Path B).** Rev 4's CONNECT-proxy + `Authorization: Bearer` header injection was mechanically impossible (CONNECT can't inject headers into TLS-encrypted upstream traffic) AND the `--internal` bridge + `--network container:` namespace mix didn't compose (a container has one net namespace). Replaced with **gateway-as-base-URL**: `OPENAI_BASE_URL=https://172.30.0.2:8443/openai/v1` + step-JWT as `OPENAI_API_KEY`. Stock SDKs work unmodified; new `loom-llm-gateway-sandbox` DaemonSet pod terminates TLS on per-trial Docker bridges with the cluster's loom-ca cert.
+  2. Per-trial `--internal` bridge with `loom-llm-gateway-sandbox` joined on demand; no `--network container:` namespace mix; no localhost forwarder; no per-trial sidecar (container count stays O(nodes)).
+  3. **RFC1918 endpoints opt-in.** `team.allow_private_endpoints` admin flag lets operators register vLLM/Llama-host providers on internal subnets. Without it, RFC1918 / ULA are rejected at create (matches rev 4); loopback / link-local stay rejected unconditionally.
+  4. **Cache vs proxy reconciled.** Egress proxy still enforces per-connection IP allowlist (the second wall vs a compromised gateway). Gateway passes `X-Loom-Connection-Id` + target IP in the CONNECT; Envoy looks up the connection's EDS-pushed allowlist and rejects mismatches. "No DNS at proxy" is about DNS resolution work; the allowlist still matters.
+  5. **Step JWT lifetime + refresh** spelled out (3600 s, re-mint via control-plane endpoint, tmpfs-injected refresh).
+  6. **MinIO `AbortIncompleteMultipartUpload`** moved to 7 days (non-trajectory prefixes) / 14 days (`trajectories/`). Rev 4's 1-day window would have killed long agent loops.
+  7. **etcd encryption is attestation, not check.** `--etcd-encryption-attested` OR `--allow-plaintext-etcd` required; no false claim of a programmatic check (which isn't portable across distros).
+  8. **Advisory lock keepalives.** Resolver pg connection sets `tcp_keepalives_idle=30` so a SIGKILL'd leader's lock releases in ~45 s, not the Linux 2-hour TCP default.
+  9. **Bench-cache eviction TOCTOU** fixed via shared/exclusive `flock(2)` discipline on `.lock/<slug>__<version>`.
+  10. Four-layer SSRF count unified across the Sandbox→gateway § and the SSRF defense §.
+  11. **`loom-egress-xds` is its own Deployment**, not a sidecar in the egress-proxy pod. NetworkPolicy stays tight (xds reaches only Postgres + DNS).
+  12. `last_validation_error` scope clarified as `provider_connections.last_validation_error`, NOT a cache-row column.
+  13. `HTTPS_PROXY=http://` confusion moot — Path B removes the HTTPS_PROXY mechanism entirely.
+  14. Rev 2/3 commentary trimmed from spec body (kept in Changelog).
+  15. Forwarder-per-trial container doubling no longer applies (forwarder removed); sandbox-endpoint is a per-node DaemonSet that joins per-trial bridges, O(nodes) not O(trials).
+  16. `--no-recreate-worker` flag dropped (no legitimate use case for keeping a stale worker token).
+  17. Anycast wording corrected ("stable on the day-scale" not "forever").
+  18. Topology diagram adds egress-proxy / egress-xds / sandbox-endpoint; opt-in worker-on-control annotation kept; SPA `loom-web` documented as `replicas: 0` for the cluster rollout.
+  19. SPA story: web Deployment ships with `replicas: 0`; operator scales up when SPA work resumes.
+  20. `--combinations` UUID source noted (`loom providers show NAME --format=id`).
+  21. First-time human login pattern shown (`export LOOM_TOKEN; --token env:LOOM_TOKEN`).
+  22. HTTP/3 / QUIC acknowledged: current design assumes HTTP/1.1+TLS over TCP; `*_BASE_URL` redirect survives HTTP/3 transport changes because the SDK dials our endpoint, not the provider's.
 - **2026-06-15 rev 4**: Addresses 27 PR #50 review-of-rev-3 concerns. Blockers (1–2), severe (3–7), material (8–16), smaller (17–27):
   1. **Sandbox→gateway auth redesigned.** The `HTTPS_PROXY=http://step-jwt@gateway` mechanism in rev 3 doesn't work with stock SDKs (httpx parses userinfo as basic-auth; gateway isn't a forward proxy). Replaced with per-trial localhost forwarder: a ~150 LOC Go binary (`loom-trial-fwd`) in the agent-runtime image, listens on `127.0.0.1:8443`, injects step-JWT in `Authorization: Bearer` header. Stock SDKs see a vanilla `HTTPS_PROXY`. New section + diagram.
   2. **Docker `--internal` bridge** instead of host iptables manipulation. Removes the `CAP_NET_ADMIN` privilege escalation on the worker DaemonSet. Per-trial bridges teardown at trial end. iptables-based design retained as a documented alternative with the privilege tradeoff spelled out.

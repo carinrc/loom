@@ -1,0 +1,121 @@
+name: images
+
+# Builds and (on push to dev/main) pushes multi-arch container images
+# for the 5 cluster-deploy components: worker, service, control-plane,
+# llm-gateway, web. Three more images (llm-gateway-sandbox,
+# gateway-router, preflight) join the matrix when the corresponding
+# Go binaries land in Phase 2/3.
+#
+# Why multi-arch: the cluster-deploy target includes ASUS Ascent GX10
+# (ARM v9.2-A). See docs/architecture/cluster-deploy.md.
+#
+# Triggers:
+#   - Pull requests touching deploy/ or src/ — build only, no push.
+#     PR builds verify the Dockerfiles cross-compile cleanly + catch
+#     arch-conditional dep issues (sentencepiece wheels, etc) before
+#     they hit dev.
+#   - Push to dev/main — build + push to ghcr.io/<owner>/loom-<image>.
+#     Tagged with the short SHA and `latest`.
+#   - workflow_dispatch — manual rebuild + push.
+
+on:
+  pull_request:
+    paths:
+      - "deploy/Dockerfile.*"
+      - "deploy/nginx-spa.conf"
+      - "src/**"
+      - "packages/**"
+      - "pyproject.toml"
+      - "web/package*.json"
+      - "web/src/**"
+      - ".github/workflows/images.yml"
+  push:
+    branches: [dev, main]
+    paths:
+      - "deploy/Dockerfile.*"
+      - "deploy/nginx-spa.conf"
+      - "src/**"
+      - "packages/**"
+      - "pyproject.toml"
+      - "web/package*.json"
+      - "web/src/**"
+      - ".github/workflows/images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required to push to GHCR with the built-in GITHUB_TOKEN.
+  packages: write
+
+concurrency:
+  group: images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ matrix.image }} (multi-arch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: worker
+            dockerfile: deploy/Dockerfile.worker
+          - image: service
+            dockerfile: deploy/Dockerfile.service
+          - image: control-plane
+            dockerfile: deploy/Dockerfile.control-plane
+          - image: llm-gateway
+            dockerfile: deploy/Dockerfile.gateway
+          - image: web
+            dockerfile: deploy/Dockerfile.web
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up QEMU (cross-arch emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        # Only on push events; PRs from forks can't read the token,
+        # and PR builds don't need to push.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${owner}/loom-${{ matrix.image }}"
+          sha_short=$(echo "${{ github.sha }}" | cut -c1-12)
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # PR builds: no tags published, but specify one anyway so
+            # buildx has a label to attach.
+            echo "tags=${image}:pr-${{ github.event.number }}" >> "$GITHUB_OUTPUT"
+          else
+            # dev/main pushes: tag with short SHA + branch name.
+            branch=$(echo "${{ github.ref_name }}")
+            echo "tags=${image}:${sha_short},${image}:${branch}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build (+ push on dev/main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          # Push only on non-PR events (dev/main + workflow_dispatch).
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          # Multi-arch builds are slow; GHA cache makes the second run
+          # cheap. scope per image keeps caches from cross-contaminating.
+          cache-from: type=gha,scope=images-${{ matrix.image }}
+          cache-to: type=gha,scope=images-${{ matrix.image }},mode=max
+          provenance: false

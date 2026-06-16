@@ -22,6 +22,8 @@ your local Docker / k8s. If a spike fails, the spec is wrong.
 | [`01-sandbox-bridge.sh`](01-sandbox-bridge.sh) | §Sandbox→gateway (a) | A singleton attached to one `--internal` and one normal bridge serves the per-trial sandbox while remaining reachable on the uplink. Sandbox on `--internal` cannot reach the internet OR the host's IP on the uplink bridge. |
 | [`02-preflight-hostpath.sh`](02-preflight-hostpath.sh) | §Prerequisites | A k8s Job with `hostPath: /var/run` (type Directory) + `test -S` schedules and reports docker.sock presence regardless of whether Docker is installed. `topologySpreadConstraints` lands one pod per worker without pre-existing role labels. |
 | [`03-hostport-from-bridge.sh`](03-hostport-from-bridge.sh) | §Sandbox→gateway (a), §K8s manifest changes | A Docker bridge container can reach a k8s `hostPort: 30443` pod via the host's IP on the bridge. This is the load-bearing routing claim for the singleton→gateway path. |
+| [`04-jwt-fsnotify-rotation.sh`](04-jwt-fsnotify-rotation.sh) | §Sandbox→gateway (b) JWT refresh | Bind-mount + host-side atomic-rename rotation is visible to the container without partial reads. **Caught a real spec bug**: revs 7–11's `docker cp` to tmpfs mount doesn't work; spec was updated. The spike's negative assertion verifies the broken mechanism stays broken (alerts if Docker ever fixes it). |
+| [`05-add-host-ssl-cert-file.sh`](05-add-host-ssl-cert-file.sh) | §Sandbox→gateway (b) | The full sandbox TLS round-trip: `--add-host` writes `/etc/hosts`, `SSL_CERT_FILE` + bind-mounted loom-ca lets stock curl validate the loom-ca-signed server cert by hostname. End-to-end no SDK changes needed. |
 
 ## How to run
 

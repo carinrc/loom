@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   docker-only-spikes:
-    name: spike 01 (Docker only, ~10 s)
+    name: spikes 01 + 04 + 05 (Docker only, ~30 s)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -28,6 +28,10 @@ jobs:
         run: docker version
       - name: Run spike 01 (sandbox bridge)
         run: bash docs/architecture/cluster-deploy-spikes/01-sandbox-bridge.sh
+      - name: Run spike 04 (JWT bind-mount rotation)
+        run: bash docs/architecture/cluster-deploy-spikes/04-jwt-fsnotify-rotation.sh
+      - name: Run spike 05 (add-host + SSL_CERT_FILE round-trip)
+        run: bash docs/architecture/cluster-deploy-spikes/05-add-host-ssl-cert-file.sh
 
   k8s-spikes:
     name: spikes 02 + 03 (kind cluster, ~3 min)

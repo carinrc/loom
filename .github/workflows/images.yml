@@ -3,11 +3,39 @@ name: images
 on:
   pull_request:
     paths:
+      - "deploy/Dockerfile.*"
+      - "src/**"
+      - ".github/workflows/images.yml"
+  push:
+    branches: [dev, main]
+    paths:
+      - "deploy/Dockerfile.*"
+      - "src/**"
       - ".github/workflows/images.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  smoke:
+  build:
+    name: ${{ matrix.image }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: worker
+            dockerfile: deploy/Dockerfile.worker
+          - image: service
+            dockerfile: deploy/Dockerfile.service
+          - image: control-plane
+            dockerfile: deploy/Dockerfile.control-plane
+          - image: llm-gateway
+            dockerfile: deploy/Dockerfile.gateway
+          - image: web
+            dockerfile: deploy/Dockerfile.web
     steps:
-      - run: echo "smoke ok"
+      - run: echo "${{ matrix.image }} ${{ matrix.dockerfile }}"

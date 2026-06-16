@@ -27,4 +27,5 @@ jobs:
           - image: service
     steps:
       - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
       - run: echo "${{ matrix.image }} ok"

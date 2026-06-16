@@ -1,8 +1,8 @@
 # Cluster deployment design
 
-**Status: design** (2026-06-15). Tracking PR: TBD. Supersedes inline guidance in `docs/architecture/service-mode.md`.
+**Status: design** (2026-06-15, revision 2). Tracking PR: [#50](https://github.com/carinrc/loom/pull/50). Supersedes inline guidance in `docs/architecture/service-mode.md`. Revision 2 addresses review feedback on PR #50 (see "Changelog" at bottom).
 
-This spec extends [#49](https://github.com/carinrc/loom/issues/49) (Production cluster deployment with user-supplied model provider gateway) for the specific deployment target the team is committing to: a small group of high-end machines (initial target: 2–4 ASUS Ascent GX10 boxes, ARM v9.2-A, NVIDIA GB10 Grace Blackwell, 128 GB unified memory, 4 TB local NVMe, 200 Gbps ConnectX-7 interconnect, 10 GbE LAN), but the design must not be coupled to that hardware. Loom is a platform; the deployment shape should be selectable.
+Extends [#49](https://github.com/carinrc/loom/issues/49). Initial deployment target is 2–4× ASUS Ascent GX10 (ARM v9.2-A, GB10 Grace Blackwell, 128 GB unified, 4 TB local NVMe, 200 Gbps ConnectX-7), but **the design is not coupled to that hardware** — Loom is a platform; the deployment shape is selectable at deploy time.
 
 ## Status block
 
@@ -10,116 +10,157 @@ This spec extends [#49](https://github.com/carinrc/loom/issues/49) (Production c
 |---|---|
 | Hardware target (initial) | 2–4× ASUS Ascent GX10 (ARM v9.2-A, GB10) |
 | Hardware target (future) | x86 servers, cloud k8s, hybrid |
-| ARM-rebuild benchmarks (SWE-Bench, OSWorld, …) | **deferred** — out of scope for this spec; documented as a gap |
-| Local vLLM / `hf_execution=local-vllm` | **dropping** — users supply OpenAI-compatible endpoints (matches #49) |
+| ARM-rebuild benchmarks (SWE-Bench, OSWorld, …) | **deferred** — documented as a gap (Appendix B) |
+| Local vLLM / `hf_execution=local-vllm` | **dropping** — users supply OpenAI-compatible endpoints |
 | Auth model | per-team token (today's model) — **no per-user IDP** for now |
-| Topology | three selectable strategies (A/B/C); user picks at deploy time |
-| HA Postgres / MinIO | **deferred** — Strategy C skeleton + documented gap |
+| Topology | two verbs: `loom service` (single-box) + `loom cluster` (k8s, 2–N nodes); HA Postgres/MinIO via `--storage external` flag |
+| HA Postgres / MinIO | **deferred** — `--storage external` skeleton + documented gap |
 
 ## Goals
 
-1. One CLI verb family (`loom deploy {local,cluster,distributed}`) covers every deployment shape. The current `loom service up/down/status` becomes `loom deploy local up/down/status` (kept as alias).
-2. The Ascent target works end-to-end: `loom deploy cluster up --nodes <hostfile>` on a workstation provisions a working cluster on the 4 boxes, prints the admin token, and the CLI / SPA / `loom eval` commands can talk to it.
-3. Multi-team users work through per-team tokens (#49's framing) without an IDP. Provider connections are team-scoped, encrypted at rest, and never injected into sandbox containers.
-4. The CLI pipeline is the **primary surface** for the foreseeable future. The SPA is paused. Every workflow that users have via the SPA today (browse benchmarks, submit a batch, monitor, fetch trajectory/ATIF) must be available as a CLI command before the SPA work resumes.
-5. The deployment story does not assume the operator has GPU hardware — Loom orchestrates; users bring their own model endpoints.
+1. The Ascent target works end-to-end. `loom cluster up --nodes hostfile` on a workstation provisions a working cluster on N boxes, prints an admin token, and the CLI/SPA can talk to it.
+2. Multi-team users work through per-team tokens (#49's framing) without an IDP. Provider connections are team-scoped, encrypted at rest, and never injected into sandbox containers.
+3. The CLI pipeline is the **primary surface**. Every SPA workflow (browse benchmarks, submit batch, monitor, fetch trajectory/ATIF) is available as a CLI command before SPA work resumes.
+4. The deployment story does not assume the operator has GPU hardware — Loom orchestrates; users bring their own model endpoints.
+5. **Data durability is design-in, not bolted on.** Trajectories survive any single-node failure on day 1.
 
 ## Non-goals
 
-- ARM-rebuilding SWE-Bench / OSWorld / skill-* images. Tracked as a separate sub-project; for now those benchmarks are off the menu on ARM nodes.
-- Per-user identity (OIDC / SAML / Active Directory). Hard line per the topology decision.
-- Distributed Postgres / MinIO HA. The Strategy C skeleton documents the gap; do not block any other phase on it.
-- Worker types other than `docker` driver. Daytona / Modal / fake stay in tree but are not part of this rollout.
-- Hot-reload of the cluster across `loom deploy cluster up` cycles (the bootstrap is idempotent but not in-place rolling).
+- ARM-rebuilding SWE-Bench / OSWorld / skill-* images (tracked separately).
+- Per-user IDP (OIDC/SAML).
+- Distributed Postgres / MinIO HA implementations (the `--storage external` flag lets operators bring managed equivalents).
+- Worker types other than `docker` driver.
+- Rolling upgrades. `loom cluster up` is idempotent but reapply is not zero-downtime.
 
-## Topology taxonomy
+## Topology
 
-Three selectable strategies. Each is a complete answer to "where does Loom run." Storage is an **orthogonal flag**.
+Two verbs. Storage is an orthogonal flag.
 
 ```
-┌─ A: Single-Box ───┐     ┌─ B: Cluster (single-storage) ─┐     ┌─ C: Distributed (HA) ──┐
-│ everything on one │     │ control box + N workers       │     │ k8s + HA components    │
-│ machine           │     │ embedded Postgres + MinIO     │     │ Postgres replication   │
-│ docker-compose    │     │ on control box; workers       │     │ MinIO distributed mode │
-│                   │     │ are pure compute              │     │ multi-replica everywhere│
-│ Use: dev, demo,   │     │ Use: 2–10 box deployments     │     │ Use: large prod,        │
-│ one user, one host│     │ (your Ascent cluster)         │     │ uptime-critical         │
-└───────────────────┘     └───────────────────────────────┘     └─────────────────────────┘
-   IMPLEMENTED                  PARTIAL (`deploy/k8s/*`)              FUTURE (skeleton only)
+┌─ loom service ───────┐     ┌─ loom cluster ─────────────────┐
+│ everything one box   │     │ control node + N worker nodes  │
+│ docker-compose       │     │ k8s manifests in deploy/k8s/   │
+│ dev, demo, one user  │     │ 2–N boxes; embedded or external│
+│                      │     │ Postgres+MinIO                 │
+└──────────────────────┘     └────────────────────────────────┘
+   IMPLEMENTED                   PARTIAL (deploy/k8s/*)
 ```
 
-**Storage dimension** (independent of strategy):
+### Storage dimension (orthogonal to verb)
 
-| `--storage` | Postgres | MinIO | Compatible with |
+| `--storage` | Postgres | Object store | Compatible with |
 |---|---|---|---|
-| `embedded` (default for A & B) | in-cluster, single PVC | in-cluster, single PVC | A, B |
-| `external` (required for C) | managed (Cloud SQL / RDS / Aurora / self-hosted PG cluster) | S3 / GCS / Azure Blob / on-prem object store | B (opt-in), C (required) |
+| `embedded` (default) | in-cluster, StatefulSet, single PVC | in-cluster MinIO, single PVC | `service`, `cluster` |
+| `external` | managed (Cloud SQL / RDS / self-hosted PG cluster) | S3 / GCS / on-prem object store | `cluster` (opt-in for HA) |
 
-Ascent cluster install: `loom deploy cluster up --nodes hostfile.txt --storage embedded`. Future prod: `loom deploy distributed up --storage external --postgres-url ... --s3-bucket ...`.
+`--storage external` is the **only** path to HA Postgres/MinIO; Loom does not ship its own replicated state. This is intentional — operators with HA requirements already have opinions about their Postgres + S3.
 
-### Topology diagram (Strategy B, your Ascent cluster)
+### Topology diagram (cluster, embedded storage — your Ascent layout)
 
 ```
-┌─────────────── Box 1 (control box) ───────────────┐    ┌── Box 2 / 3 / 4 (pure workers) ──┐
-│  postgres (StatefulSet, 1 replica, local PVC)      │    │  loom-worker (DaemonSet pod)     │
-│  minio    (StatefulSet, 1 replica, local PVC)      │ ←→ │  docker.sock                     │
-│  loom-service (Deployment, 2 replicas)             │200G│  /tmp tempdirs (local NVMe)      │
-│  loom-control-plane (Deployment, 2 replicas)       │bps │  /var/lib/loom/trajectories      │
-│  loom-llm-gateway (Deployment, 2 replicas)         │    │  (local NVMe, transient)         │
-│  loom-web (Deployment, 2 replicas)                 │    │  HF cache (local NVMe)           │
-│  loom-worker (DaemonSet pod — control box is also  │    └──────────────────────────────────┘
-│              a worker)                             │
-│  docker.sock                                       │
-│  /tmp tempdirs (local NVMe)                        │
-│  /var/lib/loom/trajectories (local)                │
-│  HF cache (local NVMe)                             │
-└────────────────────────────────────────────────────┘
+┌────────── Control node (ascent-0, tainted) ──────────┐    ┌── Worker node × N ──────────────┐
+│  postgres   (StatefulSet, 1 replica, local PVC)       │    │  loom-worker (DaemonSet pod)    │
+│  minio      (StatefulSet, 1 replica, local PVC)       │    │  docker.sock (hostPath)         │
+│  loom-service / control-plane / llm-gateway / web     │    │  bench-cache  (hostPath, READ-  │
+│      (Deployments, ≥2 replicas, spread)               │ ←→ │    THROUGH cache of MinIO)      │
+│  loom-worker (DaemonSet pod, OPT-IN via toleration)   │200G│  trajectory-cache (hostPath,    │
+│  ingress controller (nginx)                           │bps │    WRITE-THROUGH to MinIO)      │
+└───────────────────────────────────────────────────────┘    └─────────────────────────────────┘
 ```
 
-Rationale for the "no NFS" choice on this hardware: 4 TB local NVMe per box + 200 Gbps interconnect. NFS would be slower than reading objects from MinIO over the interconnect, and we'd take on NFS failure modes (stale handles, locking quirks) for no win.
+**Key data invariant:** MinIO is the source-of-truth for benchmarks + trajectories. Per-node hostPaths are *caches*, not authoritative copies. If a worker node dies, its hostPath is gone — the data is intact in MinIO. This is the change from rev 1 of this spec, which incorrectly treated hostPath as canonical.
+
+## Data architecture (canonical vs cached)
+
+| Data | Canonical home | Cache layer |
+|---|---|---|
+| Benchmark task tree (instructions, tests, environment) | MinIO bucket `benchmarks/<slug>/<version>/` | per-worker `/var/lib/loom/benchmarks/<slug>/<version>/` (read-through, populated on first task touch) |
+| Trial trajectory `events.jsonl` | MinIO bucket `trajectories/<trial_id>/` (existing) | per-worker `/var/lib/loom/trajectories/<trial_id>/` (write-through during run; can be evicted after upload completes) |
+| ATIF projection JSON | MinIO bucket `atif/<trial_id>/` (existing) | none |
+| Postgres rows (trials, batches, workers, …) | Postgres on control node | none |
+
+**Write-through model for trajectories**: the `TrajectoryWriter` continues to append to the local file (low-latency); on every event flush it also enqueues a multipart-upload to MinIO. On trial completion, complete the upload. Node failure during a run loses partial trajectory; cluster failure during a run still loses partial trajectory; trajectory of any *completed* trial is in MinIO. Recovery model: the partial-but-not-completed case is a known gap, equivalent to today's behavior.
+
+**Read-through model for benchmarks**: worker checks `bench-cache/<slug>/<version>/.complete`; if missing, downloads from MinIO and atomically renames `.tmp` → final + writes the marker. Concurrent first-fetches: per-slug-version flock prevents thundering herd. Eviction: simple LRU when `/var/lib/loom/benchmarks/` exceeds an operator-configurable quota.
+
+This is roughly the only sustainable model on a 4-box cluster: 16 benchmarks × potentially-multi-TB datasets would be brutal at 4× duplication, and shared NFS reintroduces locking quirks the spec rev 1 correctly rejected.
+
+## Network stack
+
+`loom cluster` requires a working network layer. The spec ships a default that's enough for Ascent-class clusters; operators with opinions bring their own.
+
+| Concern | Default (Phase 2) | Operator-supplied alternative |
+|---|---|---|
+| CNI | inherit cluster's (k3s ships flannel; kubeadm ships calico/cilium) | any CNI |
+| Ingress | `ingress-nginx` Helm chart, installed by `loom cluster up` if absent | Traefik / Contour / cloud LB — operator passes `--ingress none` and applies their own |
+| Service mesh | none | Istio/Linkerd opt-in via `--ingress none` |
+| Internal DNS | k8s CoreDNS (default) | unchanged |
+| External DNS | operator points wildcard `*.loom.<domain>` at ingress LB IP | required, manual |
+| TLS | self-signed cert from a generated CA (private deployments) OR operator-supplied cert (`--tls-cert PATH --tls-key PATH`) OR `cert-manager` + ACME if operator has it | cert-manager + Let's Encrypt for public domains |
+| Egress proxy (for SSRF defense, see Secrets §) | required; deployed alongside the gateway | operator-supplied (Squid/Envoy) |
+
+**Self-signed CA flow**: `loom cluster up` generates a CA + server cert if `--tls-cert` not given, writes the CA cert to stdout + a k8s ConfigMap. Operators distribute the CA cert to clients (or set `LOOM_TLS_VERIFY=false` on CLI for dev). Explicit operator action; not silent.
+
+**External DNS is required** — there's no service discovery magic that solves "operator's laptop talks to the cluster's loom-service over HTTPS." The CLI's `loom auth login --server https://...` URL has to resolve. The runbook (Phase 4) walks through wildcard DNS + ingress LB IP for the Ascent setup (typically a static IP on the control node's 10 GbE NIC; metallb in ARP mode for >1 node).
+
+## Image pipeline (multi-arch)
+
+Phase 2 requires ARM-built images. Current CI is amd64-only. Phase 2 prereq:
+
+1. **Buildx multi-arch CI**: `.github/workflows/images.yml` adds `linux/arm64` to the platforms matrix for `loom-worker`, `loom-service`, `loom-control-plane`, `loom-llm-gateway`, `loom-web`.
+2. **Registry**: push to GHCR (`ghcr.io/carinrc/loom-*`). Operators can mirror to internal registries via `--registry` flag on `loom cluster up`.
+3. **Manifest list**: each image is a multi-arch manifest. `nodeSelector` is NOT used on the worker DaemonSet for arch — k8s picks the right arch from the manifest list per node.
+4. **Bootstrap entrypoint**: ships in the existing `loom-service` image (just adds `python -m loom_service.bootstrap`); no new image.
+
+Out of scope for Phase 2: ARM rebuilds of *user* benchmark/task images (SWE-Bench eval, OSWorld VM). Appendix B documents the gap.
 
 ## CLI surface
 
-### New verb family
+### Deployment verbs
 
 ```
-loom deploy local        {up,down,status}  [--compose-file PATH] [--env-file PATH]
-loom deploy cluster      {up,down,status}  --nodes HOSTFILE [--control-node HOST] [--kubeconfig PATH] [--storage embedded|external] [--registry URL] [--namespace NS]
-loom deploy distributed  {up,down,status}  --kubeconfig PATH --storage external [--postgres-url URL] [--s3-bucket NAME] [--s3-endpoint URL]
+loom service {up,down,status,logs}                                    # single-box (existing, unchanged)
+loom cluster {up,down,status}  --nodes HOSTFILE
+    [--control-node HOST]                                              # default: first in hostfile
+    [--kubeconfig PATH]                                                # default: $KUBECONFIG
+    [--namespace NS]                                                   # default: loom
+    [--storage embedded|external]                                      # default: embedded
+    [--postgres-url URL] [--s3-endpoint URL] [--s3-bucket NAME]        # required if storage=external
+    [--registry URL]                                                   # default: ghcr.io/carinrc
+    [--ingress nginx|none] [--tls-cert PATH --tls-key PATH]
+    [--co-locate-workers-on-control]                                   # opt-in; otherwise control node is tainted
 ```
 
-`loom service` stays as an alias of `loom deploy local` (deprecation warning printed in v1+, no functional change).
+**Rename decision (revised):** keep `loom service` (single-box). Add `loom cluster` for k8s. No unified `loom deploy` verb family. Reasons: less churn on existing docs/scripts, asymmetric verbs match other tools (`docker run` vs `docker-compose up`), and `service` accurately describes the single-box mode (it IS a service, not a deployment). Reversed from rev 1.
 
-### User-facing CLI from #49 (Phase 3 of this spec)
+### User-facing CLI (Phase 2 — before cluster work)
+
+`loom auth`, `loom providers`, `loom eval` work against **any deployed Loom** — they don't require `loom cluster`. We ship them first so they're usable against an existing `loom service` install while the cluster work proceeds.
 
 ```
-loom auth login --server https://loom.example.com           # interactive token paste OR --token / env
-loom auth status                                             # whoami / current server / token type
+loom auth login --server URL [--token T | --token-file PATH]    # else interactive paste
+loom auth status
 loom auth logout
 
-loom providers create --name NAME --type openai-compatible \
-    --base-url URL --api-key env:VAR [--model M [...]] [--allowed-models LIST]
-loom providers list
-loom providers show NAME
-loom providers test NAME                                     # POST /provider-connections/{id}/test
-loom providers models NAME                                   # GET  /provider-connections/{id}/models
-loom providers update NAME --base-url URL                    # PATCH
+loom providers create --name N --type {openai-compatible,anthropic,google,custom} \
+    --base-url URL --api-key {env:VAR | file:PATH | -}            # never on CLI args
+    [--allowed-models LIST]
+loom providers list / show NAME / test NAME / models NAME
+loom providers update NAME --base-url URL                        # PATCH
 loom providers delete NAME
 
-loom eval run --provider NAME --model M --agent A --benchmark B \
+loom eval run --provider N --model M --agent A --benchmark B
     [--task ID | --task-filter JSON] [--backend B] [--name N]
-loom eval batch create --provider NAME --model M --agent A --benchmark B \
-    [--combinations FILE] [--task-filter JSON] [--concurrency N] [--name N]
-loom eval batch list [--state S]
-loom eval batch show ID
-loom eval batch cancel ID
-loom eval trial list --batch ID
-loom eval trial show ID
-loom eval trial trajectory ID [--out PATH]
-loom eval trial atif ID [--out PATH]
+loom eval batch create --provider N --model M --agent A --benchmark B
+    [--combinations FILE | --task-filter JSON] [--concurrency N] [--name N]
+loom eval batch {list,show,cancel} [--state S]
+loom eval trial {list,show} | trajectory ID [--out PATH] | atif ID [--out PATH]
 ```
 
-`loom eval` talks to the cluster's loom-service. `loom run` (existing) is the **local-stateless** path (no cluster needed). Two verbs because the workflows are genuinely different — one launches one trial on the local machine, the other submits to a service.
+`loom run` (existing, local-stateless) stays. The doc distinction:
+
+> `loom run` runs one trial on your machine, no server required.
+> `loom eval` submits to a Loom server (`loom auth login` first). Use `eval` for batches, persistence, sharing, ATIF.
 
 ### Existing commands kept verbatim
 
@@ -129,321 +170,300 @@ loom eval trial atif ID [--out PATH]
 | `loom datasets {list,show,install,refresh-catalog,import,publish,register,verify}` | unchanged (modular-D shipped) |
 | `loom config {set,show}` | unchanged |
 | `loom serve` | unchanged |
-| `loom service {up,down,status}` | alias of `loom deploy local {up,down,status}` |
 | `python -m loom_benchmark_tool ...` | deprecation shim (modular-D) |
 
 ## Schema changes
 
-### New tables: `provider_connections` + `provider_models_cache`
+### New tables (migration `0018_provider_connections.py`, down_revision = `"0017"`)
 
-Lifted from #49 verbatim. Migration `0018_provider_connections.py` (down_revision = `"0017"` per the latest existing revision).
+`provider_connections`:
 
-```python
-# provider_connections
-id: UUID PK
-team_id: UUID FK → teams.id  ON DELETE CASCADE
-provider_type: str  # 'openai-compatible' | 'anthropic' | 'google' | 'custom'
-display_name: str  # unique per (team_id, display_name)
-base_url: str
-encrypted_api_key_ref: str   # opaque reference; concrete shape is the secrets backend's
-allowed_models: list[str]    # JSONB; null = "all the provider returns"
-status: str   # 'pending' | 'valid' | 'invalid' | 'disabled'
-last_validated_at: datetime | None
-last_validation_error: str | None
-created_by: str  # subject (token type + id prefix) for audit
-created_at, updated_at: timestamptz
-
-# provider_models_cache
-provider_connection_id: UUID FK → provider_connections.id ON DELETE CASCADE
-model_id: str   # composite PK with provider_connection_id
-family: str | None
-context_length: int | None
-capabilities: dict   # JSONB, free-form
-visible: bool          # default true; operator-toggleable
-hidden_reason: str | None
-last_seen_at: timestamptz
+```
+id                          UUID PK
+team_id                     UUID FK → teams.id  ON DELETE CASCADE
+provider_type               str  -- 'openai-compatible' | 'anthropic' | 'google' | 'custom'
+display_name                str  -- UNIQUE per (team_id, display_name)
+base_url                    str
+resolved_egress_ips         list[str] JSONB  -- DNS resolved at validation, re-checked on call
+encrypted_api_key_ref       str   -- opaque ref into SecretStore
+allowed_models              list[str] | None JSONB  -- null = "all"
+status                      str   -- 'pending' | 'valid' | 'invalid' | 'disabled'
+last_validated_at           timestamptz | None
+last_validation_error       str | None
+pricing_source              str   -- 'rate-card' | 'tokens-only' | 'operator-supplied'
+pricing_data                dict | None JSONB  -- {input_usd_per_1m, output_usd_per_1m, ...}
+created_by                  str   -- "<token-type>:<token-id-suffix>"
+created_at, updated_at      timestamptz
 ```
 
-### Secrets backend abstraction
+`provider_models_cache`:
 
-Single `SecretStore` Protocol in `src/loom/security/secret_store.py`:
+```
+provider_connection_id      UUID FK → provider_connections.id  ON DELETE CASCADE
+model_id                    str   -- (PK with provider_connection_id)
+family                      str | None
+context_length              int | None
+capabilities                dict JSONB
+visible                     bool DEFAULT true  -- operator-toggleable
+hidden_reason               str | None  -- 'operator-hidden' | 'missing-upstream' | 'disabled-pricing'
+last_seen_at                timestamptz
+upstream_present            bool DEFAULT true  -- false after a refresh that didn't see this model
+```
+
+### Trial / Batch payload extensions
+
+```
+TrialConfig:
+  provider_connection_id    UUID | None  -- null = platform default provider (env-keyed, today's behavior)
+  provider_model_id         str | None
+
+Batch._CreateBatch:
+  provider_connection_id    UUID | None  -- one-of with per-Combination override
+  provider_model_id         str | None
+
+Trial DB row:
+  provider_connection_id    UUID | None FK ON DELETE SET NULL
+```
+
+**Delete semantics:** if a user deletes a provider connection while a batch is in flight, in-flight trials continue with the cached decrypted key (held in Gateway LRU; see Secrets §); new trial claims after deletion fail-fast with `provider_connection_deleted` error. The FK is `SET NULL` so historical rows stay queryable.
+
+## Secrets, SSRF, and the Gateway hot path
+
+### `SecretStore` Protocol
+
+`src/loom/security/secret_store.py`:
 
 ```python
 class SecretStore(Protocol):
-    def put(self, *, namespace: str, key: str, value: str) -> str: ...   # returns ref
+    def put(self, *, namespace: str, key: str, value: str) -> str: ...        # → ref
     def get(self, ref: str) -> str: ...
     def delete(self, ref: str) -> None: ...
+    def list_refs(self, *, namespace: str | None = None) -> Iterator[str]: ...
+    def rewrap(self, ref: str, *, new_master_key: bytes) -> str: ...           # returns new ref
 ```
 
-Implementations (selected via `LOOM_SECRET_STORE`):
-- `local-encrypted` (default for Strategy A / B-embedded): AEAD with a key derived from a single operator-supplied master secret (`LOOM_SECRET_STORE_MASTER_KEY`); ciphertext stored in `secrets` table.
-- `k8s-secret`: writes a k8s Secret in the loom namespace; ref = `k8s://namespace/secret-name`.
-- `vault` / `aws-kms` / `gcp-kms`: stubbed Protocol; not implemented in this spec.
+`list_refs` + `rewrap` are mandatory from day 1 to make master-key rotation possible. `loom admin secrets rotate --new-master-key-file PATH` walks every ref, calls `rewrap`, atomically swaps `encrypted_api_key_ref` columns inside a transaction, then bumps `LOOM_SECRET_STORE_MASTER_KEY_VERSION`.
 
-### TrialConfig / Batch payload extension
+Implementations:
+- `local-encrypted` (default for `loom service`): AES-GCM with a key derived from `LOOM_SECRET_STORE_MASTER_KEY`; ciphertext + nonce in `secrets` table.
+- `k8s-secret` (default for `loom cluster`): one k8s Secret per ref in the `loom` namespace. Ref = `k8s://<namespace>/<secret-name>`.
+- Stubs only (not shipped this rollout): `vault://`, `aws-kms://`, `gcp-kms://`.
+
+### SSRF defense: egress proxy, not allowlist
+
+The previous spec's "block RFC1918 + link-local at validation" is insufficient (IPv6 ULA, IPv6 link-local, `0.0.0.0`, `[::]`, DNS rebinding all bypass it). The shipped defense:
+
+1. At `POST /provider-connections` validation: resolve `base_url`, validate every resolved address is non-private (covers IPv4 + IPv6 + loopback + link-local + ULA), store the resolved IPs in `resolved_egress_ips`.
+2. **All gateway outbound traffic goes through an egress proxy** (`loom-egress-proxy`, simple Envoy or Squid container, deployed alongside the Gateway in both `service` and `cluster` modes). The proxy enforces:
+   - Destination must match `resolved_egress_ips` for the chosen `provider_connection_id` (defeats DNS rebinding).
+   - HTTPS only (TLS-SNI matches base_url host).
+   - Per-team rate limit (defense-in-depth against runaway).
+3. The Gateway never makes direct outbound HTTP calls to provider URLs after Phase 2; only to the egress proxy.
+
+This is shipped in Phase 2, not deferred. The allowlist-only defense fails too easily to be the only mitigation.
+
+### Gateway hot-path latency
+
+Per-call decrypt + DB lookup adds ~5–20 ms at concurrency 100. Mitigation:
+
+- In-process LRU (`functools.lru_cache` wrapped in a manual TTL): `provider_connection_id → (decrypted_key, expiry, etag)`. TTL 10 min.
+- `PATCH /provider-connections/{id}` and `DELETE /provider-connections/{id}` publish an invalidation message on a small in-process pubsub (and the cache key includes the row's `updated_at` for natural invalidation across replicas).
+- Cache hit path: ~50 µs. Cache miss: original DB+decrypt cost.
+
+### Cost computation for user-supplied endpoints
+
+User-supplied endpoints (the whole point of #49) don't have a Loom-maintained rate card. Three modes via `provider_connections.pricing_source`:
+
+| `pricing_source` | Behavior |
+|---|---|
+| `rate-card` | Look up `(provider_type, model_id)` in the seeded rate card. Default for `provider_type ∈ {anthropic, google, openai-compatible-canonical}`. |
+| `tokens-only` | Record `input_tokens` + `output_tokens` + `provider_connection_id`; leave `cost_usd = NULL`. SPA/CLI display tokens, not dollars. |
+| `operator-supplied` | Use `provider_connections.pricing_data` (`{input_usd_per_1m, output_usd_per_1m}`). Operator sets at create/update. |
+
+`loom providers create` defaults to `tokens-only` unless `--input-usd-per-1m`/`--output-usd-per-1m` are passed (operator-supplied) or `--type=anthropic|google` (rate-card).
+
+## `provider_models_cache` lifecycle
+
+| Event | Action |
+|---|---|
+| `POST /provider-connections` succeeds | Background refresh: enumerate models, populate cache, `last_seen_at = now()`, `upstream_present = true`. |
+| `GET /provider-connections/{id}/models` | If `now() - max(last_seen_at) > 1 h`, background refresh. Always return current cache (no client-side wait for refresh). |
+| `loom providers models NAME --refresh` | Synchronous refresh. |
+| Background refresh detects model gone | `upstream_present = false`, `hidden_reason = "missing-upstream"`. NOT deleted (audit trail). Re-appearing model flips back. |
+| `loom providers models NAME --hide MODEL` | `visible = false`, `hidden_reason = "operator-hidden"`. |
+| Refresh fails (network error) | Cache untouched. `last_validation_error` set. Surfaced in `loom providers show`. |
+
+Models marked `upstream_present=false AND visible=true` show in CLI with a `(missing upstream)` annotation but can still be selected (some providers de-list and re-list models without behavior changes).
+
+## K8s manifest changes (`loom cluster`)
+
+Implementation lives in PR per Phase 3. Decisions:
+
+- **`worker.yaml`**: Deployment → DaemonSet. Volume mounts: `docker.sock` (hostPath), `bench-cache` (hostPath, read-through cache only), `trajectory-cache` (hostPath, write-through to MinIO). No `--privileged`; container runs as `loom` user with docker.sock socket access via gid.
+- **Control node taint**: `loom cluster up` taints the control node with `loom.io/role=control:NoSchedule`. Worker DaemonSet pods don't tolerate this taint by default. `--co-locate-workers-on-control` flag adds the toleration (degrades on small clusters; documented tradeoff). Postgres+MinIO StatefulSets get the toleration + a `nodeSelector: loom.io/role=control` so they pin to the tainted node.
+- **`postgres.yaml`, `minio.yaml`**: keep `replicas: 1`. Add nodeSelector + toleration. Ship a `backup-cronjob.yaml` that `pg_dump`s to `s3://<bucket>/backups/postgres/<ts>.sql.gz` + `mc mirror`s MinIO to a backup bucket. CronJob defaults to disabled with a clear `# enable in operator runbook` comment.
+- **`bootstrap-job.yaml`**: one-shot Job. `python -m loom_service.bootstrap` runs `alembic upgrade head`, checks if admin token exists, mints if not. **Output mechanism**: tokens written to stdout (visible via `kubectl logs job/loom-bootstrap`); `loom cluster up` watches the Job, captures stdout, prints to operator, then `kubectl delete job/loom-bootstrap` (Job logs purged automatically). No k8s Secret involved — no etcd plaintext leak. Re-running bootstrap on an already-bootstrapped cluster is a no-op (token rotation is a separate verb, see below).
+- **`loom-service`, `control-plane`, `llm-gateway`, `web`**: keep ≥2 replicas, add `topologySpreadConstraints` so they spread across nodes.
+- **`egress-proxy.yaml`**: new. Deployment, ≥2 replicas, runs Envoy with a simple HTTP CONNECT + IP-allowlist config rendered from `provider_connections.resolved_egress_ips` (updated via a sidecar that watches Postgres NOTIFY on `provider_connections_changed`).
+- **Network policies**: ship a default `NetworkPolicy` set:
+  - `loom-worker` pods can reach `egress-proxy` + `control-plane` + `llm-gateway` only.
+  - `egress-proxy` can reach `0.0.0.0/0:443` only.
+  - Cross-team boundary enforcement: trial sandbox containers are launched by docker.sock (not as k8s pods), so k8s NetworkPolicy doesn't reach them — boundary stays at the Docker network level (existing).
+
+### Token rotation (separate from bootstrap)
 
 ```
-TrialConfig (existing) gains:
-  provider_connection_id: UUID | None   # null = use the platform default provider (env)
-  provider_model_id: str | None
-
-Batch._CreateBatch gains:
-  provider_connection_id: UUID | None
-  provider_model_id: str | None
-  # OR per-Combination override (one-of, route validates)
+loom admin token rotate --kind {admin,worker,team:<id>}     # mints new, marks old revoked, prints new
+loom admin secrets rotate --new-master-key-file PATH        # rewraps all encrypted_api_key_refs
 ```
 
-When non-null, the gateway resolves at call time: looks up the connection by id + team_id (enforces team scoping), decrypts the API key via the secrets backend, forwards the call, writes the usage row.
-
-## K8s manifest changes (Strategy B)
-
-### `deploy/k8s/worker.yaml`: Deployment → DaemonSet
-
-Today: `Deployment` with `replicas: 3` (can stack 3 workers on one node). Change to `DaemonSet` (one worker pod per node). Add nodeSelector for "node has docker.sock" if mixed-arch clusters become a thing.
-
-```yaml
-apiVersion: apps/v1
-kind: DaemonSet
-metadata: {name: loom-worker, namespace: loom}
-spec:
-  selector: {matchLabels: {app: loom-worker}}
-  template:
-    spec:
-      containers:
-        - name: worker
-          image: ${REGISTRY}/loom-worker:${VERSION}
-          env:
-            - {name: LOOM_WORKER_CONTROL_PLANE_URL,  value: "http://control-plane:8080"}
-            - {name: LOOM_WORKER_GATEWAY_URL,         value: "http://llm-gateway:9100"}
-            - name: LOOM_WORKER_TOKEN
-              valueFrom: {secretKeyRef: {name: loom-secrets, key: worker-token}}
-            - {name: LOOM_WORKER_BENCHMARK_CACHE,     value: "/var/lib/loom/benchmarks"}
-            - {name: LOOM_WORKER_TRAJECTORY_CACHE,    value: "/var/lib/loom/trajectories"}
-          volumeMounts:
-            - {name: docker-sock, mountPath: /var/run/docker.sock}
-            - {name: bench-cache, mountPath: /var/lib/loom/benchmarks}
-            - {name: trajectory-cache, mountPath: /var/lib/loom/trajectories}
-      volumes:
-        - name: docker-sock      {hostPath: {path: /var/run/docker.sock}}
-        - name: bench-cache      {hostPath: {path: /var/lib/loom/benchmarks, type: DirectoryOrCreate}}
-        - name: trajectory-cache {hostPath: {path: /var/lib/loom/trajectories, type: DirectoryOrCreate}}
-```
-
-`hostPath` for `bench-cache` + `trajectory-cache` keeps them on local NVMe per node (the rationale above). Each box pays its own first-snapshot cost; after that, all subsequent trials on that box read from the local NVMe.
-
-### New `deploy/k8s/bootstrap-job.yaml`
-
-One-shot k8s `Job` that:
-
-1. Runs `alembic upgrade head` against the Postgres in the cluster.
-2. Checks if any `admin` token exists. If yes, no-op (idempotent).
-3. If no, mints a fresh admin + worker token, writes them to a k8s Secret (`loom-bootstrap-tokens`) the operator reads with `kubectl get secret`.
-4. Logs the admin token id (not value) for audit.
-
-```yaml
-apiVersion: batch/v1
-kind: Job
-metadata: {name: loom-bootstrap, namespace: loom}
-spec:
-  backoffLimit: 3
-  template:
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: bootstrap
-          image: ${REGISTRY}/loom-service:${VERSION}
-          command: ["python", "-m", "loom_service.bootstrap"]
-          env:
-            - name: LOOM_SVC_DB_URL
-              valueFrom: {secretKeyRef: {name: loom-secrets, key: postgres-url}}
-            - {name: LOOM_BOOTSTRAP_SECRET_NAME, value: "loom-bootstrap-tokens"}
-            - {name: LOOM_BOOTSTRAP_NAMESPACE,   value: "loom"}
-```
-
-The Job is gated on the postgres StatefulSet being ready (`initContainer` doing `pg_isready` is enough; no need for k8s native dependencies).
-
-### Other manifest tweaks
-
-- `loom-service.yaml`, `control-plane.yaml`, `llm-gateway.yaml`: already 2 replicas. Add `topologySpreadConstraints` so they spread across nodes.
-- `postgres.yaml`, `minio.yaml`: keep `replicas: 1`. Add `nodeSelector: loom.io/role: control` so they pin to the designated control box.
-- New label convention: every node has `loom.io/role` ∈ `{control, worker}`. `loom deploy cluster up` labels the control node automatically.
+Rotation is its own verb. Bootstrap is fire-once-idempotent.
 
 ## Reject-batch-when-no-worker
 
-Today: `POST /batches` with `backend: "modal"` (or any backend no live worker advertises) succeeds; the batch sits forever because no worker can claim its trials. The SPA already shows `available: false` on the dropdown but the route doesn't enforce it.
+Confirmed against `src/loom_service/routes/backends.py:44` — capabilities shape is `list[dict]` with optional `backend` key; existing `list_backends` does the same extraction. Add the same check to `POST /batches` (`src/loom_service/routes/batches.py:268+`): query active workers' capabilities, fail-fast 400 if `payload.backend` not in the union. Admin override flag for "I'm provisioning a worker right now": `--force-no-worker-check`. Race window between SELECT and INSERT is acceptable (worst case: batch claims fail and surface the same error).
 
-Add to `src/loom_service/routes/batches.py:269+` (`create_batch`):
+## Token race fix (`loom service up`)
 
-```python
-# Reject upfront if no live worker advertises the chosen backend.
-# Mirrors the rule the SPA already shows on /batches/new.
-live_workers = (await s.execute(
-    select(Worker.capabilities)
-    .where(Worker.status == "active")
-)).scalars().all()
-advertised = {
-    cap.get("backend", "docker")
-    for caps_list in live_workers
-    if isinstance(caps_list, list)
-    for cap in caps_list
-    if isinstance(cap, dict)
-}
-if payload.backend not in advertised:
-    raise HTTPException(
-        status_code=400,
-        detail=(
-            f"no live worker advertises backend={payload.backend!r}. "
-            f"Available right now: {sorted(advertised) or '(none)'}"
-        ),
-    )
+Confirmed `_up` at `src/loom_cli/service_cmd.py:172` with `_write_env_tokens` at line 215. After `_write_env_tokens` returns, run:
+
+```
+docker compose ... up -d --force-recreate --no-deps worker
 ```
 
-Edge case: admin tokens may want to schedule "ahead of time" against a backend they're about to provision. Add `--force-no-worker-check` to the CLI; route gates on `is_admin(ctx)` for that override.
+so worker reads the fresh `LOOM_WORKER_TOKEN`. `docker restart` reuses old env; only `up --force-recreate` re-reads `.env`. Skippable with `--no-recreate-worker` for power users.
 
-## Token race fix (option a)
+## Multi-tenancy boundaries
 
-Today `loom service up`:
-1. `docker compose up` — containers boot with **stale** `LOOM_*_TOKEN` from `.env`
-2. `alembic upgrade head`
-3. `seed_test_data.py` runs; produces fresh tokens; `_write_env_tokens` updates `.env` (PR-35)
-4. Worker has already crashed in step 1 with the old token; keeps restarting
+Per-team scoping in the deployment:
 
-Fix in `src/loom_cli/service_cmd.py:172+` (`_up`): after step 3, recreate the worker container so it picks up the new `.env`:
+| Boundary | Mechanism |
+|---|---|
+| Provider connections | `team_id` FK; routes filter on `ctx.team_id`; cross-team access returns 404 |
+| Trial / batch ownership | existing `team_id` on rows; cross-team reads 404 |
+| Sandbox container egress (LLM calls) | egress proxy enforces per-team allowlist of `resolved_egress_ips` keyed by the trial's `provider_connection_id` |
+| Sandbox container egress (non-LLM) | docker network policy: sandbox can reach gateway + nothing else (existing) |
+| Per-team Postgres tenancy | shared schema with `team_id` columns + row-level access checks (existing); not separate schemas |
+| Per-team k8s namespace | NOT shipped — single `loom` namespace, multi-team enforced at row level. Documented as a gap; future work for hostile-tenant clusters. |
+| Per-team MinIO bucket | NOT shipped — shared buckets, prefixed by `team_id`. Cross-team bucket read attempts blocked at API layer (route filter), not at MinIO ACL layer. Trade-off: simpler ops, weaker isolation. |
 
-```python
-# Recreate worker so it reads the fresh LOOM_WORKER_TOKEN that
-# `_write_env_tokens` just wrote. `docker restart` reuses the old
-# env vars; only `up --force-recreate` re-reads `.env`.
-_run([
-    *_compose_args(compose_file, env_file),
-    "up", "-d", "--force-recreate", "--no-deps", "worker",
-], check=False)
+This is appropriate for the "trusted users, untrusted prompts" threat model (Loom's). It is not appropriate for hostile-tenant SaaS — Loom is not that yet.
+
+## Upgrade path: `loom service` → `loom cluster`
+
+For users on single-box `loom service` who outgrow it:
+
+```
+# On the source single-box install:
+loom admin export --out /tmp/loom-export.tar.gz
+    # Bundles: pg_dump of all rows + mc mirror of MinIO buckets + the master-key
+
+# On the new control node:
+loom cluster up --nodes hostfile --import /tmp/loom-export.tar.gz
+    # Restore postgres, restore MinIO, install master-key, mint NEW admin token,
+    # print mapping table (old trial_id → new trial_id is identity; nothing renumbered).
 ```
 
-Same fix lives in `loom deploy local up` after the refactor.
+Ships in Phase 4 alongside the runbook. The export bundle is the same format as the backup CronJob's output, so disaster recovery and migration share a code path.
 
-## Implementation phases — round-by-round
+## Implementation phases
 
-Each phase = one PR (or a small stack). Phase ordering enforces dependencies; phases marked **independent** can ship in parallel.
+Reordered from rev 1. Phase 2 ships the user-facing CLI **first** (works against existing `loom service`); cluster manifests come in Phase 3 once users have something to deploy with.
 
-### Phase 0 — this spec (ship as a PR for review)
+### Phase 0 — this spec, revised (current PR #50)
 
-- New file: `docs/architecture/cluster-deploy.md` (this document) with "Status: design"
-- Update `docs/architecture/service-mode.md` to point at this doc
-- No code changes
+- This document, `Status: design`.
+- Update `docs/architecture/service-mode.md` to point at this doc.
+- No code changes.
 
-### Phase 1 — `loom deploy` skeleton + token race fix
+### Phase 1 — image pipeline + token race fix
 
-- New: `src/loom_cli/deploy_cmd.py` exporting `dispatch(argv)` (mirrors `datasets_cmd.dispatch`)
-- New: `loom deploy local {up,down,status}` — calls existing `service_cmd._up/_down/_status` internally
-- New: `loom deploy cluster {up,down,status}` — **stubbed** (prints "not implemented; see Phase 2")
-- New: `loom deploy distributed {up,down,status}` — **stubbed** (Phase 5)
-- Modify: `src/loom_cli/__main__.py:main` — route `argv[0] == "deploy"` to `deploy_cmd.dispatch`
-- Modify: `service_cmd._up` — add the `--force-recreate worker` recreate after seed completes (token race fix `(a)`)
+Independent prereq for everything else. Ship first because Phase 3 cannot land without ARM images.
+
+- `.github/workflows/images.yml`: add `linux/arm64` to buildx matrix; push multi-arch manifest lists to GHCR for all 5 images.
+- `src/loom_cli/service_cmd.py:172+`: `--force-recreate worker` after `_write_env_tokens`.
+- Tests: extend `tests/loom_cli/test_service_cmd.py`.
+
+### Phase 2 — `loom auth` + `loom providers` + `loom eval` + SSRF defense
+
+Works against existing `loom service`. Cluster work parallel-tracked but not required.
+
+- Migration `0018_provider_connections.py` (down_revision="0017").
+- `src/loom/db/schema.py`: `ProviderConnection`, `ProviderModelCache`.
+- `src/loom/security/secret_store.py`: Protocol + `local-encrypted` impl.
+- `src/loom_service/routes/provider_connections.py`: 7 routes (create/list/show/update/delete/test/models).
+- Gateway: connection resolver, LRU cache, egress-proxy integration.
+- Gateway egress is forced through `loom-egress-proxy` (new container; ships in single-box compose too).
+- `src/loom_cli/{auth,providers,eval}_cmd.py`.
+- Cost-source 3-way mode (`rate-card | tokens-only | operator-supplied`) on the connection.
+- `provider_models_cache` background refresh (TTL 1 h on read; sync on `--refresh`).
+- Tests: SSRF (DNS rebinding via test resolver), key never echoed in `providers show`, LRU invalidation on PATCH.
+- Reject-batch-when-no-worker check on `POST /batches`.
+
+### Phase 3 — `loom cluster up` against Ascent boxes
+
+Depends on Phase 1 (ARM images) and Phase 2 (CLI surface so the cluster is actually usable on day one).
+
+- `deploy/k8s/worker.yaml`: Deployment → DaemonSet with the volume + write-through model.
+- `deploy/k8s/{postgres,minio}.yaml`: nodeSelector + tolerations for control taint.
+- `deploy/k8s/bootstrap-job.yaml` + `src/loom_service/bootstrap.py` (stdout token; no k8s Secret).
+- `deploy/k8s/egress-proxy.yaml`.
+- `deploy/k8s/backup-cronjob.yaml` (disabled by default).
+- `deploy/k8s/networkpolicies.yaml`.
+- `src/loom_cli/cluster_cmd.py`: `loom cluster {up,down,status}`.
+  - Reads hostfile, labels nodes (`loom.io/role=control|worker`), taints control node.
+  - Optionally installs ingress-nginx via `kubectl apply -f` from a pinned URL.
+  - Generates self-signed CA + cert if no `--tls-cert`.
+  - Applies manifests in order: namespace → secrets → PVCs → Postgres → MinIO → bootstrap Job → core deployments → DaemonSet → ingress + cert.
+  - Watches bootstrap Job, extracts tokens from stdout, prints, deletes the Job.
 - Tests:
-  - `tests/loom_cli/test_deploy_cmd.py` — argparse, dispatch table, stubs raise SystemExit(2) for unimplemented strategies
-  - `tests/loom_cli/test_service_cmd.py` — extend to assert the worker-recreate call happens after `_write_env_tokens`
-- Backward compat: `loom service up` still works; prints no warning in this phase (deprecation banner is Phase 5)
+  - kind smoke test: `loom cluster up --kubeconfig $KIND --nodes fixtures/hostfile`, `loom auth login`, `loom eval batch create`, assert batch reaches `complete`.
+  - Idempotency: re-run `loom cluster up` is a no-op (skips bootstrap when admin exists).
 
-### Phase 2 — `loom deploy cluster up` against Ascent boxes
+### Phase 4 — runbook + upgrade path
 
-**Independent of Phase 3.**
+- Promote this doc to `Status: shipped`.
+- `docs/cluster-deploy-runbook.md`: hostfile format, ingress/TLS prep, first-deploy walkthrough, common ops (rotate admin, drain node, restart workers, enable backup CronJob).
+- `loom admin export` + `loom cluster up --import`.
+- CI smoke (kind + `loom cluster up` + `loom eval run`).
 
-- Modify: `deploy/k8s/worker.yaml` — Deployment → DaemonSet; add benchmark_cache + trajectory_cache hostPaths
-- Modify: `deploy/k8s/postgres.yaml`, `minio.yaml` — `nodeSelector: loom.io/role: control`
-- New: `deploy/k8s/bootstrap-job.yaml`
-- New: `src/loom_service/bootstrap.py` — entry point for the Job (alembic + token mint + write to k8s Secret)
-- Modify: `src/loom_service/routes/batches.py` — reject submit when no live worker advertises the chosen backend
-- New: `src/loom_cli/deploy_cluster.py` — implementation of `loom deploy cluster up`:
-  - Read `--nodes hostfile.txt`; default control-node = first
-  - Label nodes via `kubectl label`
-  - Apply k8s manifests in order (Secrets → PVCs → Postgres → MinIO → bootstrap Job → service/CP/gateway/web → worker DaemonSet)
-  - Wait for bootstrap Job to complete
-  - Extract admin token from `loom-bootstrap-tokens` Secret, print to stdout
-- Tests:
-  - Integration: bring up a kind cluster in CI, `loom deploy cluster up --kubeconfig $KIND_KUBECONFIG --nodes <fake hostfile>`, assert admin token is printed + a smoke `POST /batches` works
-  - Unit: bootstrap.py is idempotent (re-run is a no-op)
-- Docs: `docs/operator-runbook.md` adds a "cluster deploy" section
+### Phase 5 — `loom admin token rotate` + `loom admin secrets rotate`
 
-### Phase 3 — `loom auth` + `loom providers` + `loom eval`
-
-**Independent of Phase 2.**
-
-- Migration: `0018_provider_connections.py` (down_revision = "0017")
-- New schema in `src/loom/db/schema.py`: `ProviderConnection`, `ProviderModelCache`
-- New: `src/loom/security/secret_store.py` — Protocol + 2 impls (`local-encrypted`, `k8s-secret`)
-- New routes in `src/loom_service/routes/provider_connections.py`:
-  - `POST   /api/v1/provider-connections` (create, encrypt + store secret)
-  - `GET    /api/v1/provider-connections` (list team's)
-  - `GET    /api/v1/provider-connections/{id}` (show)
-  - `PATCH  /api/v1/provider-connections/{id}` (update)
-  - `DELETE /api/v1/provider-connections/{id}`
-  - `POST   /api/v1/provider-connections/{id}/test` (validation)
-  - `GET    /api/v1/provider-connections/{id}/models` (refresh + return cache)
-- Modify: `loom_llm_gateway` — resolve provider connection at call time when `TrialConfig.provider_connection_id` is set; decrypt key via SecretStore; record usage
-- Modify: `src/loom/models/trial.py`, `src/loom_service/routes/batches.py` — accept `provider_connection_id` + `provider_model_id`
-- New CLI:
-  - `src/loom_cli/auth_cmd.py` — `loom auth {login,status,logout}`. Login: interactive token paste OR `--token` OR `LOOM_TOKEN` env. Writes to `~/.config/loom/config.toml`.
-  - `src/loom_cli/providers_cmd.py` — wraps the 7 routes above
-  - `src/loom_cli/eval_cmd.py` — `loom eval {run, batch create/list/show/cancel, trial list/show/trajectory/atif}` — wraps the `POST /trials`, `POST /batches`, etc. routes
-- Tests:
-  - Integration: spin up the service, exercise the full `loom auth login → providers create → eval batch create → eval batch show` flow
-  - Security: `loom providers show` MUST NOT echo the API key; route response MUST NOT echo it
-  - SSRF: `base_url` validation rejects `localhost`, `169.254.169.254`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local
-
-### Phase 4 — operator runbook + smoke test
-
-**After Phase 2 + Phase 3.**
-
-- Promote `cluster-deploy.md` from "Status: design" → "Status: shipped"
-- Write `docs/cluster-deploy-runbook.md`: hostfile format, secrets prep, first-deploy walk-through, common ops (rotate admin token, drain a node, restart workers)
-- CI smoke: kind cluster + `loom deploy cluster up` + sample `loom eval run` against a fake provider
-
-### Phase 5 — `loom deploy distributed` skeleton
-
-**Independent; can ship anytime after Phase 2.**
-
-- Modify: `src/loom_cli/deploy_cmd.py` — `loom deploy distributed up` implementation that requires `--storage external`, accepts `--postgres-url`, `--s3-bucket`, `--s3-endpoint`
-- New: `deploy/k8s/distributed/*.yaml` — manifests with the Postgres + MinIO StatefulSets removed (uses external)
-- Document HA gaps explicitly in `cluster-deploy.md` as a follow-up roadmap
-
-### Phase 6 — deprecate `loom service`
-
-After Phase 1 has been in `dev` for at least one release.
-
-- `loom service up` prints "deprecated: use `loom deploy local up`" to stderr (still functional)
-- Drop in v2
+- Token rotation verbs.
+- `SecretStore.rewrap` walkthrough.
+- Tests: rotation under load (key in flight is decrypted with old master, new connections use new master).
 
 ## Risks + mitigations
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| ARM rebuilds for benchmarks block usability | HIGH | Out of scope per the user's call; document the supported-benchmark matrix per arch. Strategy B docs explicitly list "pure-Python benchmarks only on ARM workers." |
-| K8s adoption burden on operators new to k8s | MEDIUM | `loom deploy cluster up` wraps `kubectl apply` so operators don't need to know k8s details. Runbook in Phase 4 walks through node labelling + Secrets prep. |
-| Bootstrap Job races against StatefulSet readiness | MEDIUM | `initContainer` runs `pg_isready` against the postgres service before alembic. |
-| Worker DaemonSet stacks on the control node + interferes with Postgres | MEDIUM | DaemonSet has no anti-affinity by default. Recommendation: don't run workloads on the control node initially. If needed, add `tolerations` + `nodeSelector` to exclude control-role nodes from the worker DaemonSet (1-line manifest tweak). |
-| SSRF via `provider_connections.base_url` | HIGH | Route-level allowlist matching #49's security controls. Egress-proxy mode for prod (Phase 5 tracker). |
-| API key leakage in logs / trajectory | HIGH | Three-layer: SecretStore never returns raw key to anything but the Gateway forwarder; Gateway redacts in usage records; trajectory writer scrubs known secret-prefix patterns. |
-| Token race fix (a) adds 3 s to every `loom deploy local up` | LOW | Acceptable; logs the recreate event. Skippable with `--no-recreate-worker` flag for power users. |
-| `loom eval` and `loom run` diverge in surprising ways | MEDIUM | Document explicitly in CLI help: "`loom run` is local-stateless (one trial, no cluster); `loom eval` talks to a deployed Loom cluster (batches, persistence, sharing)." Cross-link in docs. |
-| Strategy C never ships and Strategy B's single-storage failure mode is the only thing operators ever see | MEDIUM | Document the failure mode + RPO in Phase 4 runbook. Make Strategy B's backup story explicit (`kubectl exec ... pg_dump` cron + `mc mirror` for MinIO). |
+| ARM image build pipeline blocks Phase 3 | HIGH | Phase 1 ships images first; Phase 3 cannot start without them. Hard prerequisite. |
+| Network stack assumptions wrong on Ascent setup | HIGH | Default ingress-nginx + self-signed CA + explicit `--ingress none / --tls-cert` escape hatches. Runbook (Phase 4) walks the typical Ascent layout end-to-end. |
+| Trajectory data loss on node failure | HIGH (rev 1 had this) | Fixed in rev 2: trajectories canonical in MinIO, hostPath is write-through cache only. Partial-run trajectory loss remains a gap (same as today's single-box). |
+| SSRF via `provider_connections.base_url` | HIGH | Egress proxy with IP-allowlist enforcement (not just validation-time check). Defeats DNS rebinding by validating destination IP every call. |
+| API key leakage in logs / trajectory | HIGH | SecretStore returns plaintext only to gateway forwarder; gateway redacts in usage rows; trajectory writer scrubs known secret patterns. |
+| Control node death = full data loss | HIGH | `--storage external` for production; backup CronJob ships disabled with clear enable instructions; runbook documents RPO. Documented limitation. |
+| K8s burden on operators new to k8s | MEDIUM | `loom cluster up` wraps every `kubectl` call. Runbook walks the operator-supplied artifacts (hostfile, optional cert, registry). |
+| Worker DaemonSet on control node fights Postgres for IO | MEDIUM | Control node tainted by default; `--co-locate-workers-on-control` opt-in flag. Documented tradeoff. |
+| Bootstrap Job admin token in pod logs | MEDIUM | Job deleted immediately after `loom cluster up` reads stdout. journald node-local; documented in runbook. |
+| `loom eval` and `loom run` confuse users | MEDIUM | Clear doc cross-link; `loom run` help mentions "no server needed"; `loom eval` help mentions "needs `loom auth login`." |
+| Gateway latency from per-call decrypt | LOW | In-process LRU cache, TTL 10 min, invalidation on PATCH. |
+| Master-key rotation breaks existing connections | LOW | `SecretStore.rewrap` exists from day 1; Phase 5 ships the rotation verb. |
+| ingress-nginx URL pin drifts | LOW | Pinned by SHA; refreshed when we bump it intentionally. |
+| Single MinIO instance bottlenecks 4 workers at 200 Gbps | LOW | Distributed-mode MinIO via `--storage external`. Embedded single-instance is sufficient for typical workload sizes. |
 
-## Open questions for review
+## Open questions
 
-1. **`loom deploy local` vs. keeping `loom service`**: the rename is mostly cosmetic (loom service is an alias). Worth doing if we believe the user mental model improves; not worth it if it churns existing scripts. **Recommendation:** rename, since the rest of the family is `loom deploy {cluster,distributed}`.
-2. **Bootstrap Job idempotency contract**: should it overwrite the existing admin token Secret on re-run, or refuse? **Recommendation:** refuse by default, with `--rotate` flag for explicit rotation.
-3. **`loom eval` shape — verbs**: `loom eval batch create` vs. `loom eval submit`. **Recommendation:** match #49's example: `loom eval run` (single) and `loom eval batch create` (multi). Even though it's verbose, it's discoverable.
-4. **Where to enforce per-team quotas on provider calls**: today, `TeamQuota` has `fair_share_weight` for trial scheduling, not for gateway tokens. **Recommendation:** add `daily_token_budget` + `monthly_cost_budget_usd` fields to `TeamQuota` in Phase 3; Gateway checks before forwarding.
-5. **Provider connection: scope of `created_by`**: log the token-hash prefix for audit? The token type (`team` / `admin`)? Both? **Recommendation:** both, comma-joined: `created_by = "admin:7a3f...:9b8e"` (type:prefix:token-id-suffix).
-6. **Single secrets master key location for Strategy A**: today `.env` would hold `LOOM_SECRET_STORE_MASTER_KEY`. For Strategy B, k8s Secret. Should the CLI generate one if missing? **Recommendation:** yes, `loom deploy local up` mints if absent, writes to `.env`.
-7. **CI bandwidth**: kind cluster startup in CI for Phase 2 smoke is ~2 min. Acceptable on the existing `integration` job? **Recommendation:** gate behind the `ci:integration` label so PRs not touching deploy code don't pay the cost.
+1. **Self-signed CA vs operator-cert-required for Phase 3**: ship self-signed by default and let operators bring real certs, or refuse to start without `--tls-cert`? **Recommendation:** ship self-signed by default with a loud warning. Lower friction for the Ascent target.
+2. **Ingress controller pinning policy**: bump on every release, or pin and bump quarterly? **Recommendation:** pin by SHA, bump quarterly + on security advisories.
+3. **`loom-egress-proxy` choice**: Envoy or Squid? **Recommendation:** Envoy. We already have YAML for it elsewhere, and the dynamic-config story for IP allowlists is cleaner.
+4. **`provider_models_cache` background refresh frequency**: 1 h read-triggered (current spec) or also a background CronJob every 6 h? **Recommendation:** read-triggered only for v1; revisit if users complain about stale caches.
+5. **`loom service` future**: keep indefinitely as the dev/demo path, or merge into `loom cluster --single-node` once cluster is solid? **Recommendation:** keep indefinitely. The compose stack has 2 years of muscle memory; killing it churns docs/CI/CLAUDE.md.
 
-## Appendix A — `loom deploy cluster up` reference walkthrough
-
-Operator workflow on a fresh set of 4 Ascent boxes:
+## Appendix A — `loom cluster up` operator walkthrough
 
 ```bash
-# Once per cluster (or any time secrets rotate):
+# 1. Hostfile (one-time).
 cat > hostfile.txt <<EOF
 control:  ascent-0.lab.local
 worker:   ascent-1.lab.local
@@ -451,42 +471,27 @@ worker:   ascent-2.lab.local
 worker:   ascent-3.lab.local
 EOF
 
-# Optional: prep your own Secrets (otherwise loom deploy mints defaults).
-kubectl create namespace loom
-kubectl create secret generic loom-secrets -n loom \
-    --from-literal=postgres-user=loom \
-    --from-literal=postgres-password=$(openssl rand -hex 16) \
-    --from-literal=minio-access-key=$(openssl rand -hex 12) \
-    --from-literal=minio-secret-key=$(openssl rand -hex 24)
+# 2. (Optional) bring your own TLS cert + ingress decisions.
+#    Otherwise loom mints a self-signed CA.
 
-# Then:
-loom deploy cluster up \
+# 3. Deploy.
+loom cluster up \
     --nodes hostfile.txt \
     --kubeconfig ~/.kube/config-ascent \
-    --registry ghcr.io/myorg \
+    --registry ghcr.io/carinrc \
     --storage embedded
-
-# Output:
-# → labeling nodes (control: ascent-0, workers: ascent-1/2/3)
-# → applying manifests (postgres, minio, bootstrap-job, …, worker DaemonSet)
-# → waiting for bootstrap-job to complete (45 s)
+# → labels nodes (control: ascent-0, workers: ascent-1/2/3)
+# → applies manifests (postgres, minio, egress-proxy, bootstrap-job, …, worker DaemonSet)
+# → waits for bootstrap-job (~45 s)
 # ✓ cluster ready
 #
-# Admin token (paste into `loom auth login --server https://...`):
-#   loom_admin_XXXXXXXXXXXXXXXXXXXXXXX
-#
-# Endpoints:
-#   SPA:        https://loom.ascent.lab.local
-#   API:        https://loom.ascent.lab.local/api/v1
-#   Gateway:    https://gateway.ascent.lab.local (internal)
-```
+# Admin token (paste into `loom auth login`):
+#   loom_admin_XXXX
+# CA cert (distribute to clients):
+#   /tmp/loom-ca-XXXX.crt
 
-After this:
-
-```bash
+# 4. Connect.
 loom auth login --server https://loom.ascent.lab.local
-# (paste the admin token)
-
 loom providers create --name openai-prod \
     --type openai-compatible \
     --base-url https://api.openai.com/v1 \
@@ -504,18 +509,43 @@ loom eval run \
 | Benchmark | ARM (Ascent) | x86 |
 |---|---|---|
 | HumanEval, MBPP, LiveCodeBench, BFCL | ✅ | ✅ |
-| AIME-22, AIME-23, AIME-24, AIME-25 | ✅ | ✅ |
+| AIME-22/23/24/25 | ✅ | ✅ |
 | GAIA | ✅ (needs HF auth) | ✅ |
 | WebArena | ⚠️ requires Playwright ARM rebuild | ✅ |
 | SWE-Bench / SWE-Bench Verified / SWE-Bench Multimodal | ❌ (x86-only eval images) | ✅ |
 | OSWorld | ❌ (x86 VM images) | ✅ |
 | skillflow, skilllearnbench | ❌ (per-task Dockerfiles, not yet ARM-built) | ⚠️ adapter rewrite pending |
 
-To run x86-only benchmarks: rack one x86 worker, label it `loom.io/arch: amd64`, and the worker DaemonSet's `nodeSelector` matches by arch. Strategy B supports mixed-arch clusters (k8s spreads workers across architectures naturally). Out of scope for the initial Ascent deploy.
+To run x86-only benchmarks on a mixed cluster: rack one x86 worker, label it `loom.io/arch=amd64`. Worker DaemonSet schedules pods on every arch; per-task scheduler matches `task.environment.cpu_arch` to a tolerating worker. Out of scope for the initial Ascent deploy.
+
+## Changelog
+
+- **2026-06-15 rev 2**: Addresses PR #50 review concerns:
+  1. Trajectories canonical in MinIO; hostPath downgraded to write-through cache.
+  2. Bench-cache rationale rewritten as read-through, not "each box pays its own."
+  3. Strategy C dropped; folded into `loom cluster --storage external`.
+  4. Network stack section added (ingress, TLS, DNS, egress proxy).
+  5. Image pipeline section added (multi-arch CI as Phase 1 prereq).
+  6. Phases reordered: 1=images+token-race, 2=CLI surface+SSRF, 3=cluster manifests.
+  7. Control node tainted by default; opt-in `--co-locate-workers-on-control`.
+  8. `SecretStore.list_refs` + `rewrap` added to Protocol; rotation verb in Phase 5.
+  9. SSRF: egress proxy with IP-allowlist enforcement; not allowlist-only.
+  10. Gateway LRU cache + invalidation specified.
+  11. Cost: 3-way `pricing_source` enum on connection.
+  12. `provider_models_cache` refresh contract specified.
+  13. Provider-delete vs in-flight trial: SET NULL + fail-fast new claims.
+  14. Reject-batch capabilities shape verified against `routes/backends.py:44`.
+  15. Rename reversed: keep `loom service`, add `loom cluster`. No `loom deploy` family.
+  16. Bootstrap tokens via stdout + Job deletion; no k8s Secret leak.
+  17. `--rotate` removed from bootstrap; rotation is a separate verb.
+  18. Multi-tenancy boundaries enumerated; per-namespace/bucket isolation documented as gap.
+  19. Upgrade path `loom service → loom cluster` via `admin export` / `cluster up --import`.
+  20. YAML/code snippets trimmed; full manifests live in implementation PRs.
+- **2026-06-15 rev 1**: Initial spec.
 
 ## See also
 
-- [#49](https://github.com/carinrc/issues/49) — Production cluster deployment with user-supplied model provider gateway
+- [#49](https://github.com/carinrc/loom/issues/49) — Production cluster deployment with user-supplied model provider gateway
 - [service-mode.md](service-mode.md) — current single-host architecture
 - [drf-scheduling.md](drf-scheduling.md) — how the claim path matches workers to trials
 - [overview.md](overview.md)

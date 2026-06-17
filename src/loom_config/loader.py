@@ -9,9 +9,10 @@ not at first deploy.
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any
 
 _PYTHON_TYPES = frozenset({
     "str", "int", "bool", "float", "Path",

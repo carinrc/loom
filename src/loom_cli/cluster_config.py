@@ -9,12 +9,11 @@ keep dot-access (`cfg.image_tag`, `cfg.replicas.service`).
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field, fields, make_dataclass
+from dataclasses import field, fields, make_dataclass
 from pathlib import Path
 from typing import Any
 
-from loom_config.loader import RenderConfigEntry, Schema, load_schema
-
+from loom_config.loader import RenderConfigEntry, load_schema
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCHEMA = load_schema(_REPO_ROOT / "config" / "loom-schema.toml")
@@ -65,7 +64,7 @@ def _build_cluster_config_cls() -> type:
 ClusterConfig = _build_cluster_config_cls()
 
 
-def load_cluster_config(path: Path | None) -> "ClusterConfig":
+def load_cluster_config(path: Path | None) -> ClusterConfig:
     """Same semantics as before #146: empty/missing path → defaults;
     unknown top-level or nested keys raise loudly."""
     if path is None:

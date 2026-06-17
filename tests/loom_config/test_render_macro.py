@@ -25,7 +25,7 @@ def _render(template_str: str, schema) -> str:
     return tmpl.render(schema=schema)
 
 
-def test_macro_emits_secret_with_valueFrom() -> None:
+def test_macro_emits_secret_with_value_from() -> None:
     schema = load_schema(Path("config/loom-schema.toml"))
     src = "{% import '_env.j2' as e %}{{ e.env_block('control-plane', schema) }}"
     out = _render(src, schema)

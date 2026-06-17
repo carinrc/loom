@@ -4,7 +4,7 @@
 
 from pathlib import Path
 
-from pydantic import HttpUrl, PostgresDsn, SecretStr
+from pydantic import HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from loom.models.types import LogLevel

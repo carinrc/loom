@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from loom_config.codegen import render_service_settings, render_cluster_config_example
+from loom_config.codegen import render_cluster_config_example, render_service_settings
 from loom_config.loader import load_schema
 
 _REPO_SCHEMA = Path("config/loom-schema.toml")

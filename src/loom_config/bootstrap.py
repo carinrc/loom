@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-from typing import Mapping
+from collections.abc import Mapping
 
 from loom_config.loader import Schema
-
 
 _SMOKE_DEFAULTS: Mapping[str, str] = {
     "step-jwt-signing-key":   "smoke-jwt-key-do-not-use-in-prod",

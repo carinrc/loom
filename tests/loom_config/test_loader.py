@@ -7,8 +7,6 @@ import pytest
 
 from loom_config.loader import (
     Schema,
-    ServiceConfigEntry,
-    RenderConfigEntry,
     load_schema,
 )
 

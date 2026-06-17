@@ -93,9 +93,9 @@ def render_service_settings(schema: Schema, service: str) -> str:
         _HEADER
         + "\n\n"
         + f"class {cls_name}(BaseSettings):\n"
-        + f"    model_config = SettingsConfigDict(\n"
+        + "    model_config = SettingsConfigDict(\n"
         + f"        env_prefix=\"LOOM_{prefix}_\", env_file=\".env\", extra=\"forbid\",\n"
-        + f"    )\n\n"
+        + "    )\n\n"
         + body
         + "\n\n\n"
         + f"{cls_name}.model_rebuild()\n"

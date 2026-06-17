@@ -5,8 +5,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from loom_config.doctor import (
-    DoctorReport,
-    DoctorViolation,
     reconcile,
 )
 from loom_config.loader import load_schema
@@ -44,7 +42,8 @@ def test_clean_cluster_has_no_violations() -> None:
     secret_keys = set()
     for name in schema.service_config:
         e = schema.service_config[name]
-        if e.secret is None: continue
+        if e.secret is None:
+            continue
         for svc in e.used_by:
             secret_keys.add(e.secret_key_for(svc))
     pod_envs = {}
@@ -60,7 +59,8 @@ def test_missing_secret_key_is_a_violation() -> None:
     secret_keys = set()
     for name in schema.service_config:
         e = schema.service_config[name]
-        if e.secret is None or not e.required: continue
+        if e.secret is None or not e.required:
+            continue
         for svc in e.used_by:
             if name == "db_url" and svc == "control-plane":
                 continue  # intentionally drop cp-db-url

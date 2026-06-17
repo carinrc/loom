@@ -1437,6 +1437,18 @@ def _down(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bootstrap_secrets(args: argparse.Namespace) -> int:
+    from loom_config.bootstrap import render_bootstrap_command
+    schema = _load_schema(_REPO_ROOT / "config" / "loom-schema.toml")
+    print(render_bootstrap_command(
+        schema,
+        namespace=args.namespace,
+        smoke_defaults=args.smoke_defaults,
+        rotate=args.rotate,
+    ))
+    return 0
+
+
 def dispatch(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="loom cluster",
@@ -1681,6 +1693,23 @@ def dispatch(argv: list[str]) -> int:
         help="kubeconfig context (default: current context).",
     )
     p_doctor.set_defaults(handler=_doctor)
+
+    p_boot = sub.add_parser(
+        "bootstrap-secrets",
+        help="Emit the kubectl command to create loom-secrets from schema.",
+    )
+    p_boot.add_argument("--namespace", default="loom")
+    p_boot.add_argument(
+        "--smoke-defaults",
+        action="store_true",
+        help="Use test-grade placeholder values (for smoke workflows).",
+    )
+    p_boot.add_argument(
+        "--rotate",
+        action="store_true",
+        help="Run each entry's `generate` command to mint fresh values.",
+    )
+    p_boot.set_defaults(handler=_bootstrap_secrets)
 
     args = parser.parse_args(argv)
     return cast(int, args.handler(args))

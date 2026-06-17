@@ -238,20 +238,24 @@ jobs:
         # If any returns non-200, dump pod logs + fail.
         run: |
           set -euo pipefail
+          # local_port:svc:svc_port:path. Use local ports >= 18080 to
+          # avoid colliding with host services bound by kind's
+          # extraPortMappings (e.g. ingress-nginx on 80/443).
           for spec in \
-              "loom-control-plane:8080:/healthz" \
-              "loom-llm-gateway:9100:/healthz" \
-              "loom-service:8090:/api/v1/health" \
-              "loom-web:80:/" ; do
-            svc=$(echo "$spec" | cut -d: -f1)
-            port=$(echo "$spec" | cut -d: -f2)
-            path=$(echo "$spec" | cut -d: -f3-)
+              "18080:loom-control-plane:8080:/healthz" \
+              "19100:loom-llm-gateway:9100:/healthz" \
+              "18090:loom-service:8090:/api/v1/health" \
+              "18000:loom-web:80:/" ; do
+            local_port=$(echo "$spec" | cut -d: -f1)
+            svc=$(echo "$spec" | cut -d: -f2)
+            svc_port=$(echo "$spec" | cut -d: -f3)
+            path=$(echo "$spec" | cut -d: -f4-)
             echo "::group::probe ${svc}${path}"
             kubectl --context kind-loom-staging -n loom port-forward \
-              "svc/${svc}" "${port}:${port}" &
+              "svc/${svc}" "${local_port}:${svc_port}" &
             pf_pid=$!
             sleep 3
-            if ! curl -fsS --max-time 10 "http://localhost:${port}${path}"; then
+            if ! curl -fsS --max-time 10 "http://localhost:${local_port}${path}"; then
               echo "::error::probe failed for ${svc}${path}"
               kubectl --context kind-loom-staging -n loom logs \
                 "-l" "app=${svc}" --tail=200
@@ -270,17 +274,18 @@ jobs:
         run: |
           set -euo pipefail
           for spec in \
-              "loom-control-plane:8080" \
-              "loom-llm-gateway:9100" \
-              "loom-service:8090" ; do
-            svc=$(echo "$spec" | cut -d: -f1)
-            port=$(echo "$spec" | cut -d: -f2)
+              "18080:loom-control-plane:8080" \
+              "19100:loom-llm-gateway:9100" \
+              "18090:loom-service:8090" ; do
+            local_port=$(echo "$spec" | cut -d: -f1)
+            svc=$(echo "$spec" | cut -d: -f2)
+            svc_port=$(echo "$spec" | cut -d: -f3)
             echo "::group::scrape ${svc}/metrics"
             kubectl --context kind-loom-staging -n loom port-forward \
-              "svc/${svc}" "${port}:${port}" &
+              "svc/${svc}" "${local_port}:${svc_port}" &
             pf_pid=$!
             sleep 3
-            body=$(curl -fsS --max-time 10 "http://localhost:${port}/metrics" || echo "FAILED")
+            body=$(curl -fsS --max-time 10 "http://localhost:${local_port}/metrics" || echo "FAILED")
             if [ "$body" = "FAILED" ] || ! echo "$body" | grep -q "^# HELP "; then
               echo "::error::no prometheus output from ${svc}/metrics"
               echo "first 500 chars: ${body:0:500}"

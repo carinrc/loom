@@ -5,106 +5,97 @@ metadata:
 spec:
   replicas: 2
   selector:
-    matchLabels:
-      app: loom-service
+    matchLabels: { app: loom-service }
   template:
     metadata:
-      labels:
-        app: loom-service
+      labels: { app: loom-service }
     spec:
       containers:
-      - name: loom-service
-        image: loom-service:0.7
-        env:
-        - name: LOOM_SVC_ADMIN_SECRET_FILE
-          value: /var/run/loom/secrets/admin/secrets.toml
-        - name: LOOM_SVC_ARTIFACTS_BUCKET
-          value: artifacts
-        - name: LOOM_SVC_BATCH_RUNNER_BATCH_SIZE
-          value: '50'
-        - name: LOOM_SVC_BATCH_RUNNER_CP_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: loom-secrets
-              key: batch-runner-cp-token
-              optional: true
-        - name: LOOM_SVC_BATCH_RUNNER_POLL_INTERVAL_SEC
-          value: '5'
-        - name: LOOM_SVC_BATCH_RUNNER_SUBMIT_RATE_PER_SEC
-          value: '100'
-        - name: LOOM_SVC_BIND_HOST
-          value: 0.0.0.0
-        - name: LOOM_SVC_BIND_PORT
-          value: '8090'
-        - name: LOOM_SVC_CONTROL_PLANE_URL
-          value: ''
-        - name: LOOM_SVC_DB_URL
-          valueFrom:
-            secretKeyRef:
-              name: loom-secrets
-              key: svc-db-url
-        - name: LOOM_SVC_DEV_RELOAD
-          value: 'False'
-        - name: LOOM_SVC_GATEWAY_URL
-          value: ''
-        - name: LOOM_SVC_LOCAL_SERVERS_JSON
-          value: '{}'
-        - name: LOOM_SVC_LOG_LEVEL
-          value: info
-        - name: LOOM_SVC_MINIO_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: loom-secrets
-              key: minio-access-key
-        - name: LOOM_SVC_MINIO_ENDPOINT
-          value: ''
-        - name: LOOM_SVC_MINIO_REGION
-          value: us-east-1
-        - name: LOOM_SVC_MINIO_SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: loom-secrets
-              key: minio-secret-key
-        - name: LOOM_SVC_SIGNED_URL_EXPIRY_SEC
-          value: '3600'
-        - name: LOOM_SVC_TEAM_REGISTRATION_OPEN
-          value: 'False'
-        - name: LOOM_SVC_TRAJECTORIES_BUCKET
-          value: trajectories
-        - name: LOOM_ENV
-          value: production
-        volumeMounts:
-        - name: loom-admin-secret
-          mountPath: /var/run/loom/secrets/admin
-          readOnly: true
-        ports:
-        - containerPort: 8090
-        readinessProbe:
-          httpGet:
-            path: /api/v1/health
-            port: 8090
-          periodSeconds: 5
-        resources:
-          requests:
-            cpu: 200m
-            memory: 256Mi
-          limits:
-            cpu: 1
-            memory: 1Gi
-      volumes:
-      - name: loom-admin-secret
-        secret:
-          secretName: loom-admin-secret
-          defaultMode: 256
+        - name: loom-service
+          image: loom-service:0.7
+          env:
+            - name: LOOM_SVC_ADMIN_SECRET_FILE
+              value: "/var/run/loom/secrets/admin/secrets.toml"
+            - name: LOOM_SVC_ARTIFACTS_BUCKET
+              value: "artifacts"
+            - name: LOOM_SVC_BATCH_RUNNER_BATCH_SIZE
+              value: "50"
+            - name: LOOM_SVC_BATCH_RUNNER_CP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: loom-secrets
+                  key: batch-runner-cp-token
+                  optional: true
+            - name: LOOM_SVC_BATCH_RUNNER_POLL_INTERVAL_SEC
+              value: "5"
+            - name: LOOM_SVC_BATCH_RUNNER_SUBMIT_RATE_PER_SEC
+              value: "100"
+            - name: LOOM_SVC_BIND_HOST
+              value: "0.0.0.0"
+            - name: LOOM_SVC_BIND_PORT
+              value: "8090"
+            - name: LOOM_SVC_CONTROL_PLANE_URL
+              value: "http://loom-control-plane:8080"
+            - name: LOOM_SVC_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: loom-secrets
+                  key: svc-db-url
+            - name: LOOM_SVC_DEV_RELOAD
+              value: "False"
+            - name: LOOM_SVC_GATEWAY_URL
+              value: "http://loom-llm-gateway:9100"
+            - name: LOOM_SVC_LOCAL_SERVERS_JSON
+              value: "{}"
+            - name: LOOM_SVC_LOG_LEVEL
+              value: "info"
+            - name: LOOM_SVC_MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: loom-secrets
+                  key: minio-access-key
+            - name: LOOM_SVC_MINIO_ENDPOINT
+              value: "http://loom-minio:9000"
+            - name: LOOM_SVC_MINIO_REGION
+              value: "us-east-1"
+            - name: LOOM_SVC_MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: loom-secrets
+                  key: minio-secret-key
+            - name: LOOM_SVC_SIGNED_URL_EXPIRY_SEC
+              value: "3600"
+            - name: LOOM_SVC_TEAM_REGISTRATION_OPEN
+              value: "False"
+            - name: LOOM_SVC_TRAJECTORIES_BUCKET
+              value: "trajectories"
 
+            - name: LOOM_ENV
+              value: "production"
+          volumeMounts:
+            - name: loom-admin-secret
+              mountPath: /var/run/loom/secrets/admin
+              readOnly: true
+          ports:
+            - containerPort: 8090
+          readinessProbe:
+            httpGet: { path: /api/v1/health, port: 8090 }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { cpu: 1, memory: 1Gi }
+      volumes:
+        - name: loom-admin-secret
+          secret:
+            secretName: loom-admin-secret
+            defaultMode: 0400
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: loom-service
 spec:
-  selector:
-    app: loom-service
+  selector: { app: loom-service }
   ports:
-  - port: 8090
-    targetPort: 8090
+    - port: 8090
+      targetPort: 8090

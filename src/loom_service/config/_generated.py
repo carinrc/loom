@@ -23,14 +23,14 @@ class LoomServiceSettings(BaseSettings):
     batch_runner_submit_rate_per_sec: int = 100
     bind_host: str = "0.0.0.0"
     bind_port: int = 8090
-    control_plane_url: HttpUrl
+    control_plane_url: HttpUrl = "http://loom-control-plane:8080"
     db_url: PostgresDsn
     dev_reload: bool = False
-    gateway_url: HttpUrl
+    gateway_url: HttpUrl = "http://loom-llm-gateway:9100"
     local_servers_json: str = "{}"
     log_level: LogLevel = "info"
     minio_access_key: SecretStr
-    minio_endpoint: str
+    minio_endpoint: str = "http://loom-minio:9000"
     minio_region: str = "us-east-1"
     minio_secret_key: SecretStr
     signed_url_expiry_sec: int = 3600

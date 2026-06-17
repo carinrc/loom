@@ -11,8 +11,8 @@
   },
   "control_plane_url": {
     "annotation": "<class 'pydantic.networks.HttpUrl'>",
-    "default": "PydanticUndefined",
-    "required": true
+    "default": "'http://loom-control-plane:8080'",
+    "required": false
   },
   "docker_socket": {
     "annotation": "<class 'pathlib.Path'>",
@@ -36,8 +36,8 @@
   },
   "gateway_url": {
     "annotation": "<class 'pydantic.networks.HttpUrl'>",
-    "default": "PydanticUndefined",
-    "required": true
+    "default": "'http://loom-llm-gateway:9100'",
+    "required": false
   },
   "heartbeat_interval_sec": {
     "annotation": "<class 'float'>",
@@ -66,8 +66,8 @@
   },
   "minio_endpoint": {
     "annotation": "<class 'str'>",
-    "default": "PydanticUndefined",
-    "required": true
+    "default": "'http://loom-minio:9000'",
+    "required": false
   },
   "minio_region": {
     "annotation": "<class 'str'>",

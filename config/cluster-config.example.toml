@@ -12,7 +12,6 @@ minio_storage_gi = 500
 namespace = "loom"
 postgres_image = "postgres:16"
 postgres_storage_gi = 50
-worker_max_concurrent = 5
 worker_trajectory_storage_gi = 100
 
 [replicas]

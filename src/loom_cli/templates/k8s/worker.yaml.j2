@@ -15,8 +15,6 @@ spec:
         - name: worker
           image: loom-worker:{{ image_tag }}
           {{ env_macros.env_block("worker", schema) | indent(10) }}
-            - name: LOOM_WORKER_MAX_CONCURRENT
-              value: "{{ worker_max_concurrent }}"
           volumeMounts:
             - name: trajectories
               mountPath: /var/lib/loom/trajectories

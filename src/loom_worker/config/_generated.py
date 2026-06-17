@@ -17,18 +17,18 @@ class WorkerSettings(BaseSettings):
 
     benchmark_cache: Path | None = None
     claim_poll_interval_sec: float = 1.0
-    control_plane_url: HttpUrl
+    control_plane_url: HttpUrl = "http://loom-control-plane:8080"
     docker_socket: Path = Path("/var/run/docker.sock")
     drain_timeout_sec: int = 600
     enable_worker_vllm: bool = False
     fixtures_root: Path | None = None
-    gateway_url: HttpUrl
+    gateway_url: HttpUrl = "http://loom-llm-gateway:9100"
     heartbeat_interval_sec: float = 5.0
     log_level: LogLevel = "info"
     max_concurrent: int = 5
     metrics_port: int = 9090
     minio_access_key: SecretStr
-    minio_endpoint: str
+    minio_endpoint: str = "http://loom-minio:9000"
     minio_region: str = "us-east-1"
     minio_secret_key: SecretStr
     token: SecretStr

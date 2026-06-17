@@ -20,11 +20,11 @@ class ControlPlaneSettings(BaseSettings):
     bind_port: int = 8080
     db_url: PostgresDsn
     dev_reload: bool = False
-    llm_gateway_url: HttpUrl
+    llm_gateway_url: HttpUrl = "http://loom-llm-gateway:9100"
     log_level: LogLevel = "info"
     metrics_port: int = 9090
     minio_access_key: SecretStr
-    minio_endpoint: str
+    minio_endpoint: str = "http://loom-minio:9000"
     minio_region: str = "us-east-1"
     minio_secret_key: SecretStr
     signed_url_expiry_sec: int = 3600

@@ -26,7 +26,7 @@ description = "HS256 step-JWT key. CP mints, gateway verifies; mismatch → 401 
 [service_config.minio_endpoint]
 used_by     = ["control-plane", "loom-service", "worker"]
 python_type = "str"
-required    = true
+default     = "http://loom-minio:9000"
 
 [service_config.minio_access_key]
 used_by     = ["control-plane", "loom-service", "worker"]
@@ -48,17 +48,17 @@ default     = "us-east-1"
 [service_config.llm_gateway_url]
 used_by     = ["control-plane"]
 python_type = "HttpUrl"
-required    = true
+default     = "http://loom-llm-gateway:9100"
 
 [service_config.control_plane_url]
 used_by     = ["loom-service", "worker"]
 python_type = "HttpUrl"
-required    = true
+default     = "http://loom-control-plane:8080"
 
 [service_config.gateway_url]
 used_by     = ["loom-service", "worker"]
 python_type = "HttpUrl"
-required    = true
+default     = "http://loom-llm-gateway:9100"
 
 [service_config.admin_secret_file]
 used_by             = ["control-plane", "llm-gateway", "loom-service"]
@@ -290,10 +290,6 @@ default     = 500
 [render_config.worker_trajectory_storage_gi]
 python_type = "int"
 default     = 100
-
-[render_config.worker_max_concurrent]
-python_type = "int"
-default     = 5
 
 [render_config.replicas]
 python_type = "table"

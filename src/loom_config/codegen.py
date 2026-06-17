@@ -61,7 +61,7 @@ def _format_default(entry: ServiceConfigEntry, service: str, py: str) -> str:
 def _literal(value: Any, py: str) -> str:
     if py == "Path":
         return f'Path("{value}")'
-    if py in ("str", "LogLevel"):
+    if py in ("str", "LogLevel", "HttpUrl", "PostgresDsn"):
         return f'"{value}"'
     if py == "bool":
         return "True" if value else "False"

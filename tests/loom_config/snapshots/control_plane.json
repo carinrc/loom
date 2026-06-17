@@ -26,8 +26,8 @@
   },
   "llm_gateway_url": {
     "annotation": "<class 'pydantic.networks.HttpUrl'>",
-    "default": "PydanticUndefined",
-    "required": true
+    "default": "'http://loom-llm-gateway:9100'",
+    "required": false
   },
   "log_level": {
     "annotation": "typing.Literal['debug', 'info', 'warn', 'error', 'fatal']",
@@ -46,8 +46,8 @@
   },
   "minio_endpoint": {
     "annotation": "<class 'str'>",
-    "default": "PydanticUndefined",
-    "required": true
+    "default": "'http://loom-minio:9000'",
+    "required": false
   },
   "minio_region": {
     "annotation": "<class 'str'>",

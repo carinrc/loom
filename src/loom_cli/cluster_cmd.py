@@ -461,12 +461,15 @@ def render_manifests(config: ClusterConfig) -> str:
     """Render every template and join with `---` separators. Output is
     valid YAML that can be piped directly into `kubectl apply -f -`.
 
-    Templates are loaded from `loom_cli.templates.k8s` via the
-    `importlib.resources` API so packaging (sdist + wheel) picks them
-    up without needing a separate MANIFEST.in entry.
+    Templates are loaded from `loom_cli.templates.k8s` via a Jinja2
+    FileSystemLoader so that `{% import "_env.j2" as env_macros %}`
+    directives in individual templates can resolve the shared macro.
+    The package path is resolved once via `importlib.resources` so
+    packaging (sdist + wheel) continues to pick up the templates
+    without a separate MANIFEST.in entry.
     """
     try:
-        from jinja2 import Environment, StrictUndefined
+        from jinja2 import Environment, FileSystemLoader, StrictUndefined
     except ModuleNotFoundError as exc:
         # jinja2 is a core dep in pyproject.toml; this should never
         # fire in a correctly-installed environment but the error
@@ -477,23 +480,30 @@ def render_manifests(config: ClusterConfig) -> str:
             "(or `pip install -e .`) to pick up dependencies.",
         ) from exc
 
+    pkg_path = resources.files("loom_cli.templates.k8s")
     env = Environment(
+        # FileSystemLoader is required so that `{% import "_env.j2" %}`
+        # in per-service templates can resolve the shared macro file.
+        loader=FileSystemLoader(str(pkg_path)),
         # StrictUndefined makes a missing variable error LOUDLY instead
         # of rendering an empty string. Better to fail at render time
         # than silently emit a manifest with `image: loom-service:`
         # (no tag) that operators chase for an hour.
         undefined=StrictUndefined,
         keep_trailing_newline=True,
-        trim_blocks=False,
-        lstrip_blocks=False,
+        # trim_blocks + lstrip_blocks remove the newline after block
+        # tags and leading whitespace before them, which is required
+        # for the `_env.j2` macro to emit clean YAML without spurious
+        # blank lines. Verified against all existing templates — parsed
+        # YAML is identical with or without these flags.
+        trim_blocks=True,
+        lstrip_blocks=True,
     )
     ctx = config.to_render_context()
     ctx["schema"] = _load_schema(_REPO_ROOT / "config" / "loom-schema.toml")
     chunks: list[str] = []
-    pkg = resources.files("loom_cli.templates.k8s")
     for name in _TEMPLATE_ORDER:
-        template_text = (pkg / name).read_text(encoding="utf-8")
-        rendered = env.from_string(template_text).render(**ctx)
+        rendered = env.get_template(name).render(**ctx)
         # Each rendered file is itself one-or-more YAML docs. Splice
         # with `---\n` between files. Files that already end with a
         # trailing newline merge cleanly; the join trims any

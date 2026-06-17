@@ -61,9 +61,10 @@ python_type = "HttpUrl"
 default     = "http://loom-llm-gateway:9100"
 
 [service_config.admin_secret_file]
-used_by             = ["control-plane", "llm-gateway", "loom-service"]
-python_type         = "Path"
-default_per_service = { control-plane = "/var/run/loom/secrets/admin/secrets.toml", llm-gateway = "/var/run/loom/admin/secrets.toml", loom-service = "/var/run/loom/secrets/admin/secrets.toml" }
+used_by     = ["control-plane", "llm-gateway", "loom-service"]
+python_type = "Path"
+# no required, no default → `Path | None = None`
+# k8s templates inject a template-local literal after the env_block macro
 
 [service_config.log_level]
 used_by     = ["control-plane", "llm-gateway", "loom-service", "worker"]

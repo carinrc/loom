@@ -14,8 +14,6 @@ spec:
         - name: loom-service
           image: loom-service:0.7
           env:
-            - name: LOOM_SVC_ADMIN_SECRET_FILE
-              value: "/var/run/loom/secrets/admin/secrets.toml"
             - name: LOOM_SVC_ARTIFACTS_BUCKET
               value: "artifacts"
             - name: LOOM_SVC_BATCH_RUNNER_BATCH_SIZE
@@ -70,6 +68,8 @@ spec:
             - name: LOOM_SVC_TRAJECTORIES_BUCKET
               value: "trajectories"
 
+            - name: LOOM_SVC_ADMIN_SECRET_FILE
+              value: "/var/run/loom/secrets/admin/secrets.toml"
             - name: LOOM_ENV
               value: "production"
           volumeMounts:

@@ -15,6 +15,8 @@ spec:
         - name: gateway
           image: loom-llm-gateway:{{ image_tag }}
           {{ env_macros.env_block("llm-gateway", schema) | indent(10) }}
+            - name: LOOM_GW_ADMIN_SECRET_FILE
+              value: "/var/run/loom/admin/secrets.toml"
             - name: LOOM_ENV
               value: "production"
           ports:

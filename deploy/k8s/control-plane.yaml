@@ -14,8 +14,6 @@ spec:
         - name: control-plane
           image: loom-control-plane:0.7
           env:
-            - name: LOOM_CP_ADMIN_SECRET_FILE
-              value: "/var/run/loom/secrets/admin/secrets.toml"
             - name: LOOM_CP_BIND_HOST
               value: "0.0.0.0"
             - name: LOOM_CP_BIND_PORT
@@ -59,6 +57,8 @@ spec:
             - name: LOOM_CP_WORKER_RECLAIM_SWEEP_INTERVAL_SEC
               value: "30"
 
+            - name: LOOM_CP_ADMIN_SECRET_FILE
+              value: "/var/run/loom/secrets/admin/secrets.toml"
             - name: LOOM_ENV
               value: "production"
           volumeMounts:

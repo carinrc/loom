@@ -14,8 +14,6 @@ spec:
         - name: gateway
           image: loom-llm-gateway:0.7
           env:
-            - name: LOOM_GW_ADMIN_SECRET_FILE
-              value: "/var/run/loom/admin/secrets.toml"
             - name: LOOM_GW_ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -71,6 +69,8 @@ spec:
             - name: LOOM_GW_UPSTREAM_TIMEOUT_SEC
               value: "120.0"
 
+            - name: LOOM_GW_ADMIN_SECRET_FILE
+              value: "/var/run/loom/admin/secrets.toml"
             - name: LOOM_ENV
               value: "production"
           ports:

@@ -184,6 +184,12 @@ jobs:
 
       - name: Generate cluster-config.toml
         # image_tag must match what we built + loaded above.
+        # worker = 0 because the worker template needs hostPath
+        # /var/run/docker.sock for the sandbox-Docker driver, and
+        # kind nodes don't expose the host docker socket (kind runs
+        # inside a container itself). Real worker readiness is a
+        # production-only concern; the smoke verifies the other 4
+        # components + gateway-router DaemonSet.
         run: |
           cat > /tmp/cluster-config.toml <<EOF
           namespace = "loom"
@@ -194,7 +200,7 @@ jobs:
           control_plane = 1
           gateway = 1
           web = 1
-          worker = 1
+          worker = 0
           EOF
 
       - name: loom cluster preflight

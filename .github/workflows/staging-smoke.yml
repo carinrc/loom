@@ -75,8 +75,28 @@ jobs:
           done
 
       - name: Create kind cluster
+        # The ingress-nginx kind manifest pins its controller pod to
+        # nodes with `ingress-ready=true`. Without this kind config
+        # the controller pod sits Pending forever. extraPortMappings
+        # let the host reach the controller on 80/443.
         run: |
-          kind create cluster --name loom-staging --wait 60s
+          cat > /tmp/kind-config.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+              kubeadmConfigPatches:
+                - |
+                  kind: InitConfiguration
+                  nodeRegistration:
+                    kubeletExtraArgs:
+                      node-labels: "ingress-ready=true"
+              extraPortMappings:
+                - { containerPort: 80,  hostPort: 80,  protocol: TCP }
+                - { containerPort: 443, hostPort: 443, protocol: TCP }
+          EOF
+          kind create cluster --name loom-staging \
+            --config /tmp/kind-config.yaml --wait 60s
           kubectl --context kind-loom-staging cluster-info
 
       - name: Install ingress-nginx (so preflight's IngressClass check passes)

@@ -82,7 +82,21 @@ class ComponentStatus:
 
     @property
     def healthy(self) -> bool:
-        return self.available and self.ready == self.desired and self.desired > 0
+        """A component is healthy when it has reached the desired
+        replica count. A `desired=0` component (e.g., the default
+        `loom-web` paused state, or `loom-worker` when an operator
+        scales it to zero) is healthy by definition — the operator
+        configured it that way.
+
+        Before #128 caught it, this required `desired > 0` which
+        meant `loom cluster up --wait` could never succeed against
+        the default config (where `replicas.web = 0`). Available-
+        replica check is dropped for desired=0 since available
+        only makes sense when there's something to be available.
+        """
+        if self.desired == 0:
+            return self.ready == 0
+        return self.available and self.ready == self.desired
 
 
 @dataclass

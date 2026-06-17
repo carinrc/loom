@@ -170,35 +170,51 @@ def _fully_ready_apps() -> _FakeAppsV1:
 
 
 def test_collect_status_happy_path_marks_all_healthy() -> None:
-    """Every component running at desired count + secret present →
-    `all_ready` is True. Web has 0/0 (paused-by-default per
-    cluster-deploy.md); that should NOT count as healthy since
-    `healthy` requires desired > 0."""
+    """Default config: web=0 (paused), all others at desired count.
+    `desired=0` components are healthy by definition (operator
+    intentionally scaled them down), so `all_ready` is True.
+    Before #128's staging-smoke caught it, this required
+    `desired > 0` which made the default config never reach
+    `all_ready` → `loom cluster up --wait` could never succeed."""
     apps = _fully_ready_apps()
     net = _FakeNetworkingV1()
     core = _FakeCoreV1(secrets={"loom-secrets"})
     status = collect_status(apps, net, core, "loom", context=None)
     assert status.namespace == "loom"
     assert status.warnings == []
-    # The 0/0 web deployment is NOT healthy (desired must be > 0).
+    # Web 0/0 IS healthy now — operator intent.
     web = next(c for c in status.components if c.name == "loom-web")
-    assert not web.healthy
-    # So all_ready is False because web counts.
-    assert not status.all_ready
-    # Other components ARE healthy.
+    assert web.healthy
+    assert status.all_ready
+    # Non-zero components are also healthy.
     svc = next(c for c in status.components if c.name == "loom-service")
     assert svc.healthy
 
 
 def test_collect_status_with_web_scaled_up_is_all_ready() -> None:
-    """When operator scales web up, all components become healthy
-    → all_ready=True."""
+    """When operator scales web up, it's still healthy + all_ready
+    stays True."""
     apps = _fully_ready_apps()
     apps.deployments["loom-web"] = _make_deployment(2, 2)
     net = _FakeNetworkingV1()
     core = _FakeCoreV1(secrets={"loom-secrets"})
     status = collect_status(apps, net, core, "loom", context=None)
     assert status.all_ready
+
+
+def test_collect_status_with_web_partially_up_is_not_ready() -> None:
+    """desired=2 but only 1 ready is NOT healthy. The 0/0=healthy
+    rule only applies when desired is literally 0."""
+    apps = _fully_ready_apps()
+    apps.deployments["loom-web"] = _make_deployment(1, 2)
+    status = collect_status(
+        apps, _FakeNetworkingV1(),
+        _FakeCoreV1(secrets={"loom-secrets"}),
+        "loom", context=None,
+    )
+    web = next(c for c in status.components if c.name == "loom-web")
+    assert not web.healthy
+    assert not status.all_ready
 
 
 def test_collect_status_missing_component_surfaces_as_not_found() -> None:

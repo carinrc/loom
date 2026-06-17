@@ -15,9 +15,9 @@ from loom_config.loader import Schema
 
 _SMOKE_DEFAULTS: Mapping[str, str] = {
     "step-jwt-signing-key":   "smoke-jwt-key-do-not-use-in-prod",
-    "cp-db-url":              "postgresql://loom:loom@loom-postgres:5432/loom",
-    "gw-db-url":              "postgresql://loom:loom@loom-postgres:5432/loom",
-    "svc-db-url":             "postgresql://loom:loom@loom-postgres:5432/loom",
+    "cp-db-url":              "postgresql+psycopg://loom:loom@loom-postgres:5432/loom",
+    "gw-db-url":              "postgresql+psycopg://loom:loom@loom-postgres:5432/loom",
+    "svc-db-url":             "postgresql+psycopg://loom:loom@loom-postgres:5432/loom",
     "minio-access-key":       "minioadmin",
     "minio-secret-key":       "minioadmin",
     "worker-token":           "smoke-worker-token",

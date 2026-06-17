@@ -77,6 +77,7 @@ knob you need.
      --from-literal=minio-access-key=loom \
      --from-literal=minio-secret-key=$(openssl rand -hex 32) \
      --from-literal=anthropic-api-key=YOUR_KEY \
+     --from-literal=step-jwt-signing-key=$(openssl rand -hex 64) \
      --from-literal=openai-api-key=YOUR_KEY \
      --from-literal=worker-token=PLACEHOLDER
    ```

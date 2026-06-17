@@ -146,7 +146,8 @@ jobs:
             --from-literal=minio-secret-key='smokesmokesmoke' \
             --from-literal=worker-token='loom_w_placeholder_replaced_in_step_below' \
             --from-literal=openai-api-key='sk-test-not-real' \
-            --from-literal=anthropic-api-key='sk-ant-test-not-real'
+            --from-literal=anthropic-api-key='sk-ant-test-not-real' \
+            --from-literal=step-jwt-signing-key="$(openssl rand -hex 64)"
 
           printf '[admin]\ntoken="%s"\n' "${ADMIN_TOKEN}" > /tmp/admin.toml
           kubectl --context kind-loom-staging -n loom create secret generic loom-admin-secret \

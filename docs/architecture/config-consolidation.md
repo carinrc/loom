@@ -35,7 +35,7 @@ example).
 A single schema file at `config/loom-schema.toml` is the source of
 truth for both fan-outs. Pydantic Settings classes, k8s template env
 blocks, operator-facing `cluster-config.toml`, Secret bootstrap, and a
-new `loom config doctor` are all derived from it.
+new `loom cluster doctor` are all derived from it.
 
 The schema has two top-level sections, one per fan-out kind:
 
@@ -138,7 +138,7 @@ default     = 50
 | `default` | Single literal default shared across services |
 | `default_per_service` | Per-service literal defaults (use when, e.g., bind ports differ) |
 | `secret` | Presence marks the entry as Secret-backed. Has *exactly one of* `key` (single Secret key) or `key_per_service` (different Secret key per service); the loader raises if both or neither are set. Optional `generate` is a shell command stdout-substituted into Secret bootstrap. Without `secret`, the env block uses literal `value:` |
-| `description` | Surfaced in `loom config doctor` output and the generated cluster-config example |
+| `description` | Surfaced in `loom cluster doctor` output and the generated cluster-config example |
 
 `render_config.*`:
 
@@ -169,8 +169,8 @@ entry needs it on day one.
 | K8s `*.yaml.j2` env blocks | Templates call a Jinja2 macro that loops over `schema.service_config_for("<service>")` and emits `valueFrom`/`value` blocks. No hand-written env entries | n/a (templates) |
 | `src/loom_cli/cluster_config.py` | Replaced with a generic loader walking `render_config`. Unknown TOML keys raise as today | yes |
 | `config/cluster-config.example.toml` | Generated from `render_config` defaults + descriptions, committed so operators have a copy-paste starting point | yes |
-| `loom config doctor` | New CLI. Walks the schema against a target cluster: every required Secret key exists in `loom-secrets`, every declared env var is present in each running pod's env block, no orphan settings. Exit 1 on any violation. Wired into `loom cluster preflight` | new code |
-| `loom config bootstrap-secrets` | New CLI. Walks `secret` entries, emits one `kubectl create secret generic loom-secrets --from-literal=...` line. `--rotate` runs each entry's `generate:` command and substitutes the new value | new code |
+| `loom cluster doctor` | New CLI. Walks the schema against a target cluster: every required Secret key exists in `loom-secrets`, every declared env var is present in each running pod's env block, no orphan settings. Exit 1 on any violation. Wired into `loom cluster preflight` | new code |
+| `loom cluster bootstrap-secrets` | New CLI. Walks `secret` entries, emits one `kubectl create secret generic loom-secrets --from-literal=...` line. `--rotate` runs each entry's `generate:` command and substitutes the new value | new code |
 
 ## Codegen rules (`_generated.py`)
 
@@ -249,8 +249,8 @@ Each step is independently revertible:
 3. Per service, swap `config.py` to re-export from `_generated.py`. Keep call sites unchanged.
 4. Per template, swap env block to the schema-driven macro. Render golden test stays green.
 5. Replace `cluster_config.py` with the generic loader against `render_config`. Regenerate `config/cluster-config.example.toml`.
-6. Add `loom config doctor` + wire into `loom cluster preflight`.
-7. Add `loom config bootstrap-secrets` + update `docs/operator-runbook.md`, `.github/workflows/cluster-smoke.yml`, `.github/workflows/staging-smoke.yml` to use it.
+6. Add `loom cluster doctor` + wire into `loom cluster preflight`.
+7. Add `loom cluster bootstrap-secrets` + update `docs/operator-runbook.md`, `.github/workflows/cluster-smoke.yml`, `.github/workflows/staging-smoke.yml` to use it.
 
 ## Edge cases handled at implementation time
 
@@ -258,7 +258,7 @@ Each step is independently revertible:
 - **Worker-only Path fields** (`docker_socket`, `fixtures_root`, `benchmark_cache`, `trajectory_cache_dir`) map cleanly: `used_by = ["worker"]`, `python_type = "Path"`, optional via no `required`.
 - **`extra = "forbid"`** stays on the generated `SettingsConfigDict`. Any env var not in the schema fails fast at service startup — same protection the hand-written classes have today.
 - **Boolean envs** (`dev_reload`, `enable_worker_vllm`, `team_registration_open`) use `python_type = "bool"`; Pydantic's standard truthy-string parsing applies.
-- **`generate` is a shell command, not a function name.** `loom config bootstrap-secrets` runs it via `subprocess.run` with `shell=False` after `shlex.split`. The operator sees the exact command in `--dry-run` output before any cluster mutation.
+- **`generate` is a shell command, not a function name.** `loom cluster bootstrap-secrets` runs it via `subprocess.run` with `shell=False` after `shlex.split`. The operator sees the exact command in `--dry-run` output before any cluster mutation.
 
 ## Out of scope
 

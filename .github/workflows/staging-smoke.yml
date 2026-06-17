@@ -291,7 +291,9 @@ jobs:
               "svc/${svc}" "${local_port}:${svc_port}" &
             pf_pid=$!
             sleep 3
-            body=$(curl -fsS --max-time 10 "http://localhost:${local_port}/metrics" || echo "FAILED")
+            # `-L` to follow the 307 from prometheus_client's mounted
+            # ASGI app (`/metrics` → `/metrics/`).
+            body=$(curl -fsSL --max-time 10 "http://localhost:${local_port}/metrics" || echo "FAILED")
             if [ "$body" = "FAILED" ] || ! echo "$body" | grep -q "^# HELP "; then
               echo "::error::no prometheus output from ${svc}/metrics"
               echo "first 500 chars: ${body:0:500}"

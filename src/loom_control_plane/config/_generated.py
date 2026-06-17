@@ -15,7 +15,7 @@ class ControlPlaneSettings(BaseSettings):
         env_prefix="LOOM_CP_", env_file=".env", extra="forbid",
     )
 
-    admin_secret_file: Path | None = None
+    admin_secret_file: Path = Path("/var/run/loom/secrets/admin/secrets.toml")
     bind_host: str = "0.0.0.0"
     bind_port: int = 8080
     db_url: PostgresDsn

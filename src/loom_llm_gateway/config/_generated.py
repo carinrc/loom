@@ -15,7 +15,7 @@ class GatewaySettings(BaseSettings):
         env_prefix="LOOM_GW_", env_file=".env", extra="forbid",
     )
 
-    admin_secret_file: Path | None = None
+    admin_secret_file: Path = Path("/var/run/loom/admin/secrets.toml")
     anthropic_api_key: SecretStr | None = None
     bind_host: str = "0.0.0.0"
     bind_port: int = 9100

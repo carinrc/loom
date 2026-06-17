@@ -61,9 +61,9 @@ python_type = "HttpUrl"
 required    = true
 
 [service_config.admin_secret_file]
-used_by     = ["control-plane", "llm-gateway", "loom-service"]
-python_type = "Path"
-# no required, no default → `Path | None = None`
+used_by             = ["control-plane", "llm-gateway", "loom-service"]
+python_type         = "Path"
+default_per_service = { control-plane = "/var/run/loom/secrets/admin/secrets.toml", llm-gateway = "/var/run/loom/admin/secrets.toml", loom-service = "/var/run/loom/secrets/admin/secrets.toml" }
 
 [service_config.log_level]
 used_by     = ["control-plane", "llm-gateway", "loom-service", "worker"]

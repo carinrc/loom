@@ -15,7 +15,7 @@ class LoomServiceSettings(BaseSettings):
         env_prefix="LOOM_SVC_", env_file=".env", extra="forbid",
     )
 
-    admin_secret_file: Path | None = None
+    admin_secret_file: Path = Path("/var/run/loom/secrets/admin/secrets.toml")
     artifacts_bucket: str = "artifacts"
     batch_runner_batch_size: int = 50
     batch_runner_cp_token: SecretStr | None = None

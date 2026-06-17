@@ -1,7 +1,7 @@
 {
   "admin_secret_file": {
-    "annotation": "pathlib.Path | None",
-    "default": "None",
+    "annotation": "<class 'pathlib.Path'>",
+    "default": "PosixPath('/var/run/loom/secrets/admin/secrets.toml')",
     "required": false
   },
   "bind_host": {

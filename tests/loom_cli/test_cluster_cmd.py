@@ -155,8 +155,12 @@ def _fully_ready_apps() -> _FakeAppsV1:
     apps.deployments["loom-llm-gateway"] = _make_deployment(2, 2)
     apps.deployments["loom-web"] = _make_deployment(0, 0)  # paused by default
     apps.deployments["loom-worker"] = _make_deployment(3, 3)
-    apps.statefulsets["postgres"] = _make_statefulset(1, 1)
-    apps.statefulsets["minio"] = _make_statefulset(1, 1)
+    # Keyed by the ACTUAL k8s resource name, not the display name.
+    # The status code looks up via k8s names (`loom-postgres`,
+    # `loom-minio`) and renders rows under the display name
+    # (`postgres`, `minio`).
+    apps.statefulsets["loom-postgres"] = _make_statefulset(1, 1)
+    apps.statefulsets["loom-minio"] = _make_statefulset(1, 1)
     return apps
 
 
@@ -360,8 +364,9 @@ def test_cli_status_returns_1_when_a_component_not_ready(
     not fully ready — distinguishes 'cluster down' (2) from
     'cluster present but broken' (1) for CI scripts."""
     apps = _fully_ready_apps()
-    # Postgres down.
-    apps.statefulsets["postgres"] = _make_statefulset(0, 1)
+    # Postgres down. Keyed by the k8s resource name (`loom-postgres`),
+    # not the display name (`postgres`).
+    apps.statefulsets["loom-postgres"] = _make_statefulset(0, 1)
     apps.deployments["loom-web"] = _make_deployment(2, 2)
     monkeypatch.setattr(
         "loom_cli.cluster_cmd._load_clients",
@@ -419,3 +424,40 @@ def test_cli_status_namespace_flag_passed_to_collector(
     )
     main(["cluster", "status", "--namespace", "loom-stage"])
     assert captured_ns["ns"] == "loom-stage"
+
+
+def test_collect_status_looks_up_statefulsets_by_k8s_name_not_display_name(
+) -> None:
+    """Regression: the StatefulSet entries in _COMPONENT_STATEFULSETS
+    are `(display_name, k8s_resource_name)` tuples with the two
+    fields DIFFERING for postgres + minio. The status API lookup
+    MUST use the k8s resource name (`loom-postgres`), not the
+    display name (`postgres`). A fake k8s populated only with the
+    real resource name + a status snapshot reporting `1/1 ready`
+    proves the lookup uses the right key.
+
+    Caught by staging-smoke run #7 — earlier the lookup used the
+    wrong field and every postgres/minio status was `not-found`
+    even though the StatefulSet was actually running.
+    """
+    from loom_cli.cluster_cmd import collect_status
+    apps = _FakeAppsV1()
+    apps.deployments["loom-service"] = _make_deployment(2, 2)
+    apps.deployments["loom-control-plane"] = _make_deployment(2, 2)
+    apps.deployments["loom-llm-gateway"] = _make_deployment(2, 2)
+    apps.deployments["loom-web"] = _make_deployment(2, 2)
+    apps.deployments["loom-worker"] = _make_deployment(3, 3)
+    # ONLY the k8s-name key; the display name is NOT present.
+    apps.statefulsets["loom-postgres"] = _make_statefulset(1, 1)
+    apps.statefulsets["loom-minio"] = _make_statefulset(1, 1)
+    status = collect_status(
+        apps, _FakeNetworkingV1(),
+        _FakeCoreV1(secrets={"loom-secrets"}),
+        "loom", context=None,
+    )
+    by_display = {c.name: c for c in status.components}
+    assert by_display["postgres"].kind == "StatefulSet"
+    assert by_display["postgres"].ready == 1
+    assert by_display["postgres"].note is None
+    assert by_display["minio"].ready == 1
+    assert by_display["minio"].note is None

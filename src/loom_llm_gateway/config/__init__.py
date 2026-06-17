@@ -10,7 +10,6 @@ from loom_llm_gateway.config._generated import GatewaySettings as _BaseSettings
 from loom_llm_gateway.config.local_providers import (
     LocalProviderConfig,
     parse_local_providers_from_env,
-    _parse_local_providers_from_env,
 )
 
 
@@ -24,5 +23,4 @@ __all__ = [
     "GatewaySettings",
     "LocalProviderConfig",
     "parse_local_providers_from_env",
-    "_parse_local_providers_from_env",
 ]

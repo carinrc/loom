@@ -36,8 +36,3 @@ def parse_local_providers_from_env() -> dict[str, LocalProviderConfig]:
             api_key=parts.get("api_key"),
         )
     return out
-
-
-# Backward-compat alias: the original symbol was private (_parse_local_providers_from_env).
-# Tests and any other callers that import the old name still work.
-_parse_local_providers_from_env = parse_local_providers_from_env

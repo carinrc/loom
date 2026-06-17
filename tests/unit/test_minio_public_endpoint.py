@@ -11,18 +11,15 @@ Covers:
 
 from __future__ import annotations
 
-import hashlib
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from loom_service.storage import rewrite_to_public
-
 
 # ─── helper: build a minimal LoomServiceSettings-like namespace ───────────────
 
@@ -138,10 +135,9 @@ def test_rewrite_http_to_http_preserves_scheme() -> None:
 
 def _make_app(minio_public_endpoint: str | None = None) -> FastAPI:
     """Build the loom_service FastAPI app with mocked minio + settings."""
-    from loom_service.config import LoomServiceSettings
-    from loom_service.routes.trials import router as trials_router
     from loom_service.routes.atif import router as atif_router
     from loom_service.routes.trajectory import router as traj_router
+    from loom_service.routes.trials import router as trials_router
 
     app = FastAPI()
     app.include_router(trials_router, prefix="/api/v1")
@@ -162,7 +158,7 @@ def _make_app(minio_public_endpoint: str | None = None) -> FastAPI:
     )
 
     mock_minio = MagicMock()
-    mock_minio.generate_presigned_url.side_effect = lambda op, Params, ExpiresIn: (
+    mock_minio.generate_presigned_url.side_effect = lambda op, Params, ExpiresIn: (  # noqa: N803  # boto3 kwarg names
         _fake_presigned_traj
         if "events.jsonl" in Params.get("Key", "")
         else _fake_presigned
@@ -197,7 +193,6 @@ def _make_app(minio_public_endpoint: str | None = None) -> FastAPI:
     mock_session.__aexit__ = MagicMock(return_value=False)
     mock_session.execute = MagicMock(return_value=mock_execute)
     # Make execute awaitable
-    import asyncio
 
     async def _async_execute(*_a: object, **_kw: object) -> MagicMock:
         return mock_execute
@@ -230,13 +225,8 @@ def _fake_token(team_id: object) -> str:
 
 def _client_no_auth(app: FastAPI) -> TestClient:
     """TestClient with auth dependency overridden to a no-op."""
-    from loom_service.dependencies import SessionAndCtx
-    from loom_service.auth_guards import require_scope, require_team_or_admin
 
     # We patch require_scope + require_team_or_admin to pass silently
-    import loom_service.routes.trials as trials_mod
-    import loom_service.routes.atif as atif_mod
-    import loom_service.routes.trajectory as traj_mod
 
     return TestClient(app, raise_server_exceptions=True)
 

@@ -232,7 +232,8 @@ def _mint_batch_runner_cp_token(
             "Batches will queue but not fan out.\n",
         )
         return None
-    return resp.json()["token"]
+    token: str = resp.json()["token"]
+    return token
 
 
 def _print_summary(tokens: dict[str, str]) -> None:

@@ -9,9 +9,9 @@ keep dot-access (`cfg.image_tag`, `cfg.replicas.service`).
 from __future__ import annotations
 
 import tomllib
-from dataclasses import field, fields, make_dataclass
+from dataclasses import dataclass, field, fields, make_dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loom_config.loader import RenderConfigEntry, load_schema
 
@@ -43,7 +43,7 @@ def _build_cluster_config_cls() -> type:
             py_type = {"str": str, "int": int, "bool": bool, "float": float}[entry.python_type]
             spec.append((name, py_type, field(default=entry.default)))
 
-    def _to_render_context(self) -> dict[str, Any]:
+    def _to_render_context(self: Any) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for f in fields(self):
             val = getattr(self, f.name)
@@ -61,7 +61,36 @@ def _build_cluster_config_cls() -> type:
     )
 
 
-ClusterConfig = _build_cluster_config_cls()
+if TYPE_CHECKING:
+    # Static shape for mypy. Mirrors the runtime dataclass produced by
+    # _build_cluster_config_cls() so call sites get attribute checking
+    # and `-> ClusterConfig` annotations type-check. When the schema
+    # (config/loom-schema.toml) changes, refresh this stub to match.
+
+    @dataclass(frozen=True)
+    class _ReplicasConfig:
+        service: int = 2
+        control_plane: int = 2
+        gateway: int = 2
+        web: int = 0
+        worker: int = 3
+
+    @dataclass(frozen=True)
+    class ClusterConfig:
+        gateway_public_host: str = ""
+        image_tag: str = "0.7"
+        ingress_host: str = "loom.example.com"
+        minio_image: str = "minio/minio"
+        minio_storage_gi: int = 500
+        namespace: str = "loom"
+        postgres_image: str = "postgres:16"
+        postgres_storage_gi: int = 50
+        replicas: _ReplicasConfig = field(default_factory=_ReplicasConfig)
+        worker_trajectory_storage_gi: int = 100
+
+        def to_render_context(self) -> dict[str, Any]: ...
+else:
+    ClusterConfig = _build_cluster_config_cls()
 
 
 def load_cluster_config(path: Path | None) -> ClusterConfig:
@@ -82,8 +111,9 @@ def load_cluster_config(path: Path | None) -> ClusterConfig:
     kwargs: dict[str, Any] = {}
     for name, val in raw.items():
         entry_field = next(f for f in fields(ClusterConfig) if f.name == name)
-        if hasattr(entry_field.type, "__dataclass_fields__"):
-            sub_cls = entry_field.type
+        field_type = entry_field.type
+        if isinstance(field_type, type) and hasattr(field_type, "__dataclass_fields__"):
+            sub_cls: type = field_type
             sub_known = {f.name for f in fields(sub_cls)}
             if not isinstance(val, dict):
                 raise ValueError(f"[{name}] must be a TOML table")

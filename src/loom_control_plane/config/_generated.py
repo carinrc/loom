@@ -4,6 +4,7 @@
 # will be reverted by CI's `loom config codegen --check` gate.
 
 from pathlib import Path
+from typing import cast
 
 from pydantic import HttpUrl, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,7 +22,7 @@ class ControlPlaneSettings(BaseSettings):
     bind_port: int = 8080
     db_url: PostgresDsn
     dev_reload: bool = False
-    llm_gateway_url: HttpUrl = "http://loom-llm-gateway:9100"
+    llm_gateway_url: HttpUrl = cast(HttpUrl, "http://loom-llm-gateway:9100")
     log_level: LogLevel = "info"
     metrics_port: int = 9090
     minio_access_key: SecretStr

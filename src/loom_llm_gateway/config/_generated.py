@@ -4,6 +4,7 @@
 # will be reverted by CI's `loom config codegen --check` gate.
 
 from pathlib import Path
+from typing import cast
 
 from pydantic import HttpUrl, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict

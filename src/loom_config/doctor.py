@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Any
 
 from loom_config.loader import Schema
@@ -54,10 +55,10 @@ def reconcile(schema: Schema, core_v1_api: Any, namespace: str) -> DoctorReport:
     # 2) every declared env var present in each pod
     pods = core_v1_api.list_namespaced_pod(namespace=namespace).items
     for pod in pods:
-        svc = _service_from_pod_name(pod.metadata.name, schema.service_prefix)
-        if svc is None:
+        pod_svc = _service_from_pod_name(pod.metadata.name, schema.service_prefix)
+        if pod_svc is None:
             continue
-        expected = {e.env_var_for(svc) for e in schema.service_config_for(svc)}
+        expected = {e.env_var_for(pod_svc) for e in schema.service_config_for(pod_svc)}
         for c in pod.spec.containers:
             present = {e.name for e in (c.env or [])}
             for missing in expected - present:
@@ -84,8 +85,10 @@ def reconcile(schema: Schema, core_v1_api: Any, namespace: str) -> DoctorReport:
     return DoctorReport(violations=violations)
 
 
-def _service_from_pod_name(name: str, prefix: dict[str, str]) -> str | None:
+def _service_from_pod_name(name: str | None, prefix: Mapping[str, str]) -> str | None:
     """Pods are named `loom-<service>-...`. Find which service this is."""
+    if name is None:
+        return None
     for svc in prefix:
         if name.startswith(f"loom-{svc}-") or name == f"loom-{svc}":
             return svc

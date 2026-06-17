@@ -4,6 +4,7 @@
 # will be reverted by CI's `loom config codegen --check` gate.
 
 from pathlib import Path
+from typing import cast
 
 from pydantic import HttpUrl, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,10 +25,10 @@ class LoomServiceSettings(BaseSettings):
     batch_runner_submit_rate_per_sec: int = 100
     bind_host: str = "0.0.0.0"
     bind_port: int = 8090
-    control_plane_url: HttpUrl = "http://loom-control-plane:8080"
+    control_plane_url: HttpUrl = cast(HttpUrl, "http://loom-control-plane:8080")
     db_url: PostgresDsn
     dev_reload: bool = False
-    gateway_url: HttpUrl = "http://loom-llm-gateway:9100"
+    gateway_url: HttpUrl = cast(HttpUrl, "http://loom-llm-gateway:9100")
     local_servers_json: str = "{}"
     log_level: LogLevel = "info"
     minio_access_key: SecretStr

@@ -4,6 +4,7 @@
 # will be reverted by CI's `loom config codegen --check` gate.
 
 from pathlib import Path
+from typing import cast
 
 from pydantic import HttpUrl, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,12 +19,12 @@ class WorkerSettings(BaseSettings):
 
     benchmark_cache: Path | None = None
     claim_poll_interval_sec: float = 1.0
-    control_plane_url: HttpUrl = "http://loom-control-plane:8080"
+    control_plane_url: HttpUrl = cast(HttpUrl, "http://loom-control-plane:8080")
     docker_socket: Path = Path("/var/run/docker.sock")
     drain_timeout_sec: int = 600
     enable_worker_vllm: bool = False
     fixtures_root: Path | None = None
-    gateway_url: HttpUrl = "http://loom-llm-gateway:9100"
+    gateway_url: HttpUrl = cast(HttpUrl, "http://loom-llm-gateway:9100")
     heartbeat_interval_sec: float = 5.0
     log_level: LogLevel = "info"
     max_concurrent: int = 5

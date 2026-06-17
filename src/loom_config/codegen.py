@@ -26,6 +26,7 @@ _HEADER = """\
 # will be reverted by CI's `loom config codegen --check` gate.
 
 from pathlib import Path
+from typing import cast
 
 from pydantic import HttpUrl, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -83,6 +84,8 @@ def _field_line(entry: ServiceConfigEntry, service: str) -> str:
         return f"    {entry.name}: {py}"
     if rendered_default == "<optional>":
         return f"    {entry.name}: {py} | None = None"
+    if py in ("HttpUrl", "PostgresDsn"):
+        return f"    {entry.name}: {py} = cast({py}, {rendered_default})"
     return f"    {entry.name}: {py} = {rendered_default}"
 
 

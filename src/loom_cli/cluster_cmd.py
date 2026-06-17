@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from loom_cli.cluster_config import ClusterConfig, load_cluster_config
+from loom_config.doctor import reconcile as _doctor_reconcile
 from loom_config.loader import load_schema as _load_schema
 
 # Repo root: cluster_cmd.py → loom_cli → src → loom (parents[2])
@@ -944,6 +945,34 @@ def _preflight(args: argparse.Namespace) -> int:
             f"error: failed to read cluster state: {type(exc).__name__}: {exc}\n",
         )
         return 2
+    if not args.no_doctor:
+        schema = _load_schema(_REPO_ROOT / "config" / "loom-schema.toml")
+        try:
+            doctor_report = _doctor_reconcile(schema, core_v1, namespace=args.namespace)
+        except Exception as exc:
+            report.checks.append(PreflightCheck(
+                name="schema-doctor",
+                outcome="warn",
+                detail=f"doctor could not run: {type(exc).__name__}: {exc}",
+            ))
+        else:
+            if doctor_report.ok:
+                report.checks.append(PreflightCheck(
+                    name="schema-doctor",
+                    outcome="pass",
+                    detail="schema reconciliation clean",
+                ))
+            else:
+                report.checks.append(PreflightCheck(
+                    name="schema-doctor",
+                    outcome="fail",
+                    detail=f"{len(doctor_report.violations)} schema violation(s)",
+                    remediation="\n".join(
+                        f"  - {v.kind}: {v.entry}: {v.detail}"
+                        for v in doctor_report.violations
+                    ),
+                ))
+
     if args.format == "json":
         sys.stdout.write(_format_preflight_json(report))
     else:
@@ -951,6 +980,27 @@ def _preflight(args: argparse.Namespace) -> int:
     # Exit 1 only when something explicitly failed; warns alone keep
     # exit 0 so CI scripts don't have to special-case them.
     return 1 if report.any_fail else 0
+
+
+def _doctor(args: argparse.Namespace) -> int:
+    try:
+        _apps_v1, _net_v1, core_v1, _storage_v1 = _load_clients(args.context)
+    except RuntimeError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 2
+    except Exception as exc:
+        sys.stderr.write(
+            f"error: cannot connect to cluster: {type(exc).__name__}: {exc}\n",
+        )
+        return 2
+    schema = _load_schema(_REPO_ROOT / "config" / "loom-schema.toml")
+    report = _doctor_reconcile(schema, core_v1, namespace=args.namespace)
+    if report.ok:
+        print("[ok] schema reconciliation clean")
+        return 0
+    for v in report.violations:
+        print(f"  [fail] [{v.kind}] {v.entry}: {v.detail}")
+    return 1
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1462,6 +1512,15 @@ def dispatch(argv: list[str]) -> int:
         default="table",
         help="Output format. JSON for CI/scripting.",
     )
+    p_preflight.add_argument(
+        "--no-doctor",
+        dest="no_doctor",
+        action="store_true",
+        help=(
+            "Skip schema-vs-cluster reconciliation (use when applying "
+            "to an empty cluster where loom-secrets does not yet exist)."
+        ),
+    )
     p_preflight.set_defaults(handler=_preflight)
 
     p_up = sub.add_parser(
@@ -1606,6 +1665,22 @@ def dispatch(argv: list[str]) -> int:
         ),
     )
     p_audit.set_defaults(handler=_audit)
+
+    p_doctor = sub.add_parser(
+        "doctor",
+        help="Reconcile config schema against a live cluster.",
+    )
+    p_doctor.add_argument(
+        "--namespace",
+        default="loom",
+        help="Kubernetes namespace (default: loom).",
+    )
+    p_doctor.add_argument(
+        "--context",
+        default=None,
+        help="kubeconfig context (default: current context).",
+    )
+    p_doctor.set_defaults(handler=_doctor)
 
     args = parser.parse_args(argv)
     return cast(int, args.handler(args))

@@ -31,3 +31,10 @@ def test_bootstrap_without_smoke_defaults_uses_placeholders() -> None:
     schema = load_schema(Path("config/loom-schema.toml"))
     line = render_bootstrap_command(schema, namespace="loom", smoke_defaults=False)
     assert "<EDIT_ME>" in line
+
+
+def test_bootstrap_includes_infra_secrets() -> None:
+    schema = load_schema(Path("config/loom-schema.toml"))
+    line = render_bootstrap_command(schema, namespace="loom", smoke_defaults=True)
+    assert "--from-literal=postgres-user=loom" in line
+    assert "--from-literal=postgres-password=loom" in line

@@ -252,6 +252,20 @@ used_by     = ["worker"]
 python_type = "int"
 default     = 1
 
+# ─── infra_secrets: Secret keys used by 3rd-party containers (postgres) ───
+# Not Pydantic fields — bootstrap-secrets covers them, doctor verifies them,
+# but no codegen Settings field is emitted.
+#
+# Note: minio uses the same minio-access-key / minio-secret-key as the loom
+# services (declared in service_config above), so they need no entry here.
+
+[infra_secrets.postgres-user]
+description = "Postgres superuser (POSTGRES_USER in postgres.yaml.j2)"
+
+[infra_secrets.postgres-password]
+description = "Postgres superuser password (POSTGRES_PASSWORD in postgres.yaml.j2)"
+generate    = "openssl rand -hex 16"
+
 # ─── render_config ───
 
 [render_config.namespace]

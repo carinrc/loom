@@ -27,6 +27,9 @@ _SMOKE_DEFAULTS: Mapping[str, str] = {
     "together-api-key":       "smoke-together",
     "huggingface-api-key":    "smoke-hf",
     "batch-runner-cp-token":  "smoke-batch-cp-token",
+    # infra_secrets: 3rd-party containers that read from loom-secrets
+    "postgres-user":          "loom",
+    "postgres-password":      "loom",
 }
 
 
@@ -38,6 +41,7 @@ def _all_secret_keys(schema: Schema) -> set[str]:
             continue
         for svc in e.used_by:
             keys.add(e.secret_key_for(svc))
+    keys.update(schema.infra_secrets)
     return keys
 
 
@@ -54,6 +58,13 @@ def _value_for(key: str, *, smoke_defaults: bool, rotate: bool, schema: Schema) 
                     return subprocess.check_output(
                         shlex.split(e.secret.generate), text=True,
                     ).strip()
+        # infra_secrets entries
+        if key in schema.infra_secrets:
+            infra = schema.infra_secrets[key]
+            if infra.generate:
+                return subprocess.check_output(
+                    shlex.split(infra.generate), text=True,
+                ).strip()
     return "<EDIT_ME>"
 
 

@@ -69,13 +69,16 @@ def reconcile(schema: Schema, core_v1_api: Any, namespace: str) -> DoctorReport:
                 ))
 
     # 3) orphan secrets (key in loom-secrets but no schema entry refs it)
-    referenced_keys = set(expected_secret_keys)
+    # Collect all keys declared in schema (required + optional service_config,
+    # and infra_secrets for 3rd-party containers like postgres).
+    referenced_keys: set[str] = set()
     for name in schema.service_config:
         entry = schema.service_config[name]
-        if entry.secret is None or entry.required:
+        if entry.secret is None:
             continue
         for svc in entry.used_by:
             referenced_keys.add(entry.secret_key_for(svc))
+    referenced_keys.update(schema.infra_secrets)
     for k in secret_keys - referenced_keys:
         violations.append(DoctorViolation(
             entry=k, kind="orphan_secret",

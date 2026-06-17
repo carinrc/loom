@@ -65,6 +65,19 @@ class ServiceConfigEntry:
 
 
 @dataclass(frozen=True)
+class InfraSecretEntry:
+    """A Secret key used by a 3rd-party container (e.g. postgres).
+
+    These live in ``loom-secrets`` and are referenced by k8s templates but
+    do NOT correspond to a Pydantic Settings field in any loom microservice.
+    """
+
+    name: str
+    description: str = ""
+    generate: str | None = None
+
+
+@dataclass(frozen=True)
 class RenderConfigEntry:
     name: str
     python_type: str
@@ -79,6 +92,7 @@ class Schema:
     service_prefix: Mapping[str, str]
     service_config: Mapping[str, ServiceConfigEntry]
     render_config: Mapping[str, RenderConfigEntry]
+    infra_secrets: Mapping[str, InfraSecretEntry] = field(default_factory=dict)
 
     def service_config_for(
         self, service: str,
@@ -168,6 +182,7 @@ def load_schema(path: Path) -> Schema:
         raise ValueError("[service_prefix] table is required and non-empty")
     service_raw = raw.get("service_config", {}) or {}
     render_raw = raw.get("render_config", {}) or {}
+    infra_raw = raw.get("infra_secrets", {}) or {}
     service = {
         name: _parse_service_entry(name, val, prefix)
         for name, val in service_raw.items()
@@ -176,9 +191,18 @@ def load_schema(path: Path) -> Schema:
         name: _parse_render_entry(name, val)
         for name, val in render_raw.items()
     }
+    infra = {
+        name: InfraSecretEntry(
+            name=name,
+            description=val.get("description", ""),
+            generate=val.get("generate"),
+        )
+        for name, val in infra_raw.items()
+    }
     return Schema(
         version=version,
         service_prefix=prefix,
         service_config=service,
         render_config=render,
+        infra_secrets=infra,
     )

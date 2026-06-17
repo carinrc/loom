@@ -162,3 +162,41 @@ default = "y"
     )
     with pytest.raises(ValueError, match="ghost-service"):
         load_schema(p)
+
+
+def test_secret_key_for_raises_on_non_secret_entry(tmp_path: Path) -> None:
+    schema = load_schema(_write_minimal_schema(tmp_path))
+    minio = schema.service_config["minio_endpoint"]
+    with pytest.raises(ValueError, match="not secret-backed"):
+        minio.secret_key_for("control-plane")
+
+
+def test_value_for_raises_on_secret_entry(tmp_path: Path) -> None:
+    schema = load_schema(_write_minimal_schema(tmp_path))
+    step = schema.service_config["step_jwt_signing_key"]
+    with pytest.raises(ValueError, match="secret-backed"):
+        step.value_for("control-plane")
+
+
+def test_value_for_raises_when_no_default(tmp_path: Path) -> None:
+    """A non-secret entry with no default and no default_per_service
+    raises when value_for is called — codegen should never hit this
+    (such fields are emitted as `T | None = None`) but the contract is
+    enforced explicitly."""
+    p = tmp_path / "no_default.toml"
+    p.write_text(
+        '''
+[meta]
+version = 1
+[service_prefix]
+control-plane = "CP"
+[service_config.x]
+used_by = ["control-plane"]
+python_type = "str"
+''',
+        encoding="utf-8",
+    )
+    schema = load_schema(p)
+    x = schema.service_config["x"]
+    with pytest.raises(ValueError, match="no default"):
+        x.value_for("control-plane")

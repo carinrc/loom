@@ -240,7 +240,7 @@ jobs:
           set -euo pipefail
           for spec in \
               "loom-control-plane:8080:/healthz" \
-              "loom-llm-gateway:9100:/health" \
+              "loom-llm-gateway:9100:/healthz" \
               "loom-service:8090:/api/v1/health" \
               "loom-web:80:/" ; do
             svc=$(echo "$spec" | cut -d: -f1)

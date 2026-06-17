@@ -67,23 +67,36 @@ jobs:
       - name: Build images (parallel)
         # Build all 5 loom images in parallel. Each gets the smoke
         # run-id as its tag so concurrent runs on the same daemon
-        # don't collide. Sequential builds took 30+ min uncached
-        # (timeout); parallel + GitHub's BuildKit cache cuts ~half.
+        # don't collide. The Dockerfile names (control-plane,
+        # gateway, service, worker, web) don't match the image names
+        # (loom-control-plane, loom-llm-gateway, loom-service,
+        # loom-worker, loom-web) one-to-one — `gateway` Dockerfile
+        # produces `loom-llm-gateway`. Image names MUST match what
+        # the k8s templates reference.
         run: |
           set -euo pipefail
           export DOCKER_BUILDKIT=1
+          # (dockerfile-suffix, image-name) pairs.
+          builds=(
+            "control-plane:loom-control-plane"
+            "gateway:loom-llm-gateway"
+            "service:loom-service"
+            "worker:loom-worker"
+            "web:loom-web"
+          )
           pids=()
-          for component in control-plane gateway service worker web; do
-            image="loom-${component}:${IMAGE_TAG}"
+          for pair in "${builds[@]}"; do
+            suffix="${pair%%:*}"
+            image_name="${pair##*:}"
+            image="${image_name}:${IMAGE_TAG}"
             (
               echo "::group::Build ${image}"
-              docker build -f "deploy/Dockerfile.${component}" \
-                -t "${image}" . 2>&1 | sed "s/^/[${component}] /"
+              docker build -f "deploy/Dockerfile.${suffix}" \
+                -t "${image}" . 2>&1 | sed "s/^/[${suffix}] /"
               echo "::endgroup::"
             ) &
             pids+=($!)
           done
-          # Fail the step if any background build failed.
           rc=0
           for pid in "${pids[@]}"; do
             wait "$pid" || rc=$?
@@ -137,8 +150,8 @@ jobs:
         # would fail to pull (kind has no registry config for
         # `loom-*:smoke-*` tags).
         run: |
-          for component in control-plane gateway service worker web; do
-            kind load docker-image "loom-${component}:${IMAGE_TAG}" \
+          for image_name in loom-control-plane loom-llm-gateway loom-service loom-worker loom-web; do
+            kind load docker-image "${image_name}:${IMAGE_TAG}" \
               --name loom-staging
           done
 

@@ -37,7 +37,10 @@ jobs:
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'staging-smoke'))
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 5 image builds (uncached) + kind boot + ingress-nginx + apply +
+    # wait-for-ready easily run 30-40 min on a cold runner. 45 leaves
+    # headroom for the wait step's worst case.
+    timeout-minutes: 45
     env:
       IMAGE_TAG: smoke-${{ github.run_id }}
     steps:
@@ -61,18 +64,31 @@ jobs:
       - name: Sync python deps (with [cluster] extra)
         run: uv sync --extra cluster
 
-      - name: Build images
-        # The five loom images. Each is built with the smoke run-id
-        # as the tag so we never collide with other concurrent runs
-        # on the same machine.
+      - name: Build images (parallel)
+        # Build all 5 loom images in parallel. Each gets the smoke
+        # run-id as its tag so concurrent runs on the same daemon
+        # don't collide. Sequential builds took 30+ min uncached
+        # (timeout); parallel + GitHub's BuildKit cache cuts ~half.
         run: |
+          set -euo pipefail
+          export DOCKER_BUILDKIT=1
+          pids=()
           for component in control-plane gateway service worker web; do
             image="loom-${component}:${IMAGE_TAG}"
-            echo "::group::Build ${image}"
-            docker build -f deploy/Dockerfile.${component} \
-              -t "${image}" .
-            echo "::endgroup::"
+            (
+              echo "::group::Build ${image}"
+              docker build -f "deploy/Dockerfile.${component}" \
+                -t "${image}" . 2>&1 | sed "s/^/[${component}] /"
+              echo "::endgroup::"
+            ) &
+            pids+=($!)
           done
+          # Fail the step if any background build failed.
+          rc=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || rc=$?
+          done
+          exit "$rc"
 
       - name: Create kind cluster
         # The ingress-nginx kind manifest pins its controller pod to

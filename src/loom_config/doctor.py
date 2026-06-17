@@ -1,8 +1,8 @@
 """`loom cluster doctor`: schema-vs-cluster reconciliation."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from loom_config.loader import Schema

@@ -55,12 +55,34 @@ describe("ProviderDetail", () => {
 
   it("clicking Models tab switches content", async () => {
     const user = userEvent.setup();
-    renderPage(CONN);
+    // Use per-call mock so each fetch gets a fresh Response (reusing a single
+    // Response object fails because the body stream can only be consumed once).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_url: string) => {
+        if (_url.includes("/models")) {
+          return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify(CONN), { status: 200 }));
+      }),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/providers/abc"]}>
+          <Routes>
+            <Route path="/providers/:id" element={<ProviderDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /models/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("tab", { name: /models/i }));
-    expect(screen.getByText(/models tab/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /add manual model/i })).toBeInTheDocument();
+    });
   });
 
   it("404 response shows not-found message", async () => {

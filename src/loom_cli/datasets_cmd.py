@@ -508,10 +508,15 @@ def _cmd_sync_config(args: argparse.Namespace) -> int:
         )
         print(banner)
         print(render_plan_table(plan))
-        if plan.tasks_upserted:
+        if plan.tasks:
             print()
-            for bid, count in sorted(plan.tasks_upserted.items()):
-                print(f"  {bid}: {count} tasks")
+            for bid, counts in sorted(plan.tasks.items()):
+                print(
+                    f"  {bid}: {counts.total} tasks "
+                    f"(inserted={counts.inserted} "
+                    f"updated={counts.updated} "
+                    f"unchanged={counts.unchanged})",
+                )
         return 0
 
     try:

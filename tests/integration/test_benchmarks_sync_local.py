@@ -21,6 +21,7 @@ from loom_cli.benchmarks_sync import (
     LOCAL_FOLDER_KIND,
     SYNC_IMPORTED_BY,
     SyncError,
+    TaskCounts,
     sync,
 )
 
@@ -111,7 +112,9 @@ async def test_local_sync_creates_rows(
                 registry_names=set(),  # no entry-points to collide with
             )
 
-        assert plan.tasks_upserted == {"team-evals": 3}
+        assert plan.tasks == {
+            "team-evals": TaskCounts(inserted=3, updated=0, unchanged=0),
+        }
         assert [(r.kind, r.id, r.action) for r in plan.rows] == [
             ("local", "team-evals", "INSERT"),
         ]
@@ -177,11 +180,13 @@ async def test_local_sync_idempotent(
                 cfg, fixtures_root=fixtures_root,
                 session=session, registry_names=set(),
             )
-        # Second pass: benchmark row matches → SKIP unchanged. Task
-        # upserts still re-run (they always do; idempotent at the DB
-        # level via on_conflict_do_update).
+        # Second pass: benchmark row matches → SKIP unchanged. Tasks
+        # match by checksum → all unchanged, zero writes.
         assert [r.action for r in plan_two.rows] == ["SKIP"]
         assert plan_two.rows[0].reason == "unchanged"
+        assert plan_two.tasks == {
+            "team-evals": TaskCounts(inserted=0, updated=0, unchanged=3),
+        }
 
         async with factory() as session:
             count = (await session.execute(
@@ -223,10 +228,15 @@ async def test_local_sync_updates_checksum_on_mutation(
         (bench_root / "alpha" / "instruction.md").write_text("do alpha v2\n")
 
         async with factory() as session:
-            await sync(
+            plan = await sync(
                 cfg, fixtures_root=fixtures_root,
                 session=session, registry_names=set(),
             )
+        # Per-task SELECT-then-UPSERT: only alpha changed; siblings
+        # stay unchanged with zero writes.
+        assert plan.tasks == {
+            "team-evals": TaskCounts(inserted=0, updated=1, unchanged=2),
+        }
 
         async with factory() as session:
             updated = (await session.execute(
@@ -275,6 +285,108 @@ async def test_local_sync_skips_missing_source_dir(
                 select(Benchmark).where(Benchmark.id == "ghost"),
             )
             assert result.scalar_one_or_none() is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_local_sync_skips_empty_source_dir(
+    postgres_url: str, tmp_path: Path,
+) -> None:
+    """Spec: missing/empty source dir → WARN+SKIP without zombie row."""
+    fixtures_root = tmp_path / "fixtures"
+    (fixtures_root / "ghost").mkdir(parents=True)  # exists but empty
+    toml_path = tmp_path / "benchmarks.toml"
+    _write_toml(toml_path, "ghost")
+    cfg = load_benchmarks_config(toml_path)
+    assert cfg is not None
+
+    engine = create_async_engine(postgres_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with factory() as session:
+            plan = await sync(
+                cfg, fixtures_root=fixtures_root,
+                session=session, registry_names=set(),
+            )
+        assert [r.action for r in plan.rows] == ["SKIP"]
+        assert "empty" in plan.rows[0].reason
+
+        # Crucial: no zombie row for an empty registered benchmark.
+        async with factory() as session:
+            result = await session.execute(
+                select(Benchmark).where(Benchmark.id == "ghost"),
+            )
+            assert result.scalar_one_or_none() is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_local_sync_aborts_on_invalid_task_toml(
+    postgres_url: str, tmp_path: Path,
+) -> None:
+    """A malformed task.toml under a [[local]] entry aborts with SyncError."""
+    fixtures_root = tmp_path / "fixtures"
+    bench_root = fixtures_root / "bad"
+    bench_root.mkdir(parents=True)
+    bundle = bench_root / "broken"
+    bundle.mkdir()
+    (bundle / "task.toml").write_text("this is = NOT = valid TOML\n")
+    toml_path = tmp_path / "benchmarks.toml"
+    _write_toml(toml_path, "bad")
+    cfg = load_benchmarks_config(toml_path)
+    assert cfg is not None
+
+    engine = create_async_engine(postgres_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with factory() as session:
+            with pytest.raises(SyncError) as exc:
+                await sync(
+                    cfg, fixtures_root=fixtures_root,
+                    session=session, registry_names=set(),
+                )
+        assert "invalid task.toml" in str(exc.value)
+        assert "broken" in str(exc.value)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_local_sync_dry_run_writes_no_rows(
+    postgres_url: str,
+    fixtures_root: Path,
+    benchmark_layout: tuple[Path, Path],
+    toml_path: Path,
+) -> None:
+    """`--dry-run` parses + computes the plan but writes nothing."""
+    cfg = load_benchmarks_config(toml_path)
+    assert cfg is not None
+    engine = create_async_engine(postgres_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with factory() as session:
+            plan = await sync(
+                cfg, fixtures_root=fixtures_root,
+                session=session, registry_names=set(),
+                dry_run=True,
+            )
+
+        assert plan.tasks == {
+            "team-evals": TaskCounts(inserted=3, updated=0, unchanged=0),
+        }
+        assert [r.action for r in plan.rows] == ["INSERT"]
+
+        async with factory() as session:
+            bench = (await session.execute(
+                select(Benchmark).where(Benchmark.id == "team-evals"),
+            )).scalar_one_or_none()
+            assert bench is None
+            tasks = (await session.execute(
+                select(TaskRow).where(TaskRow.benchmark_id == "team-evals"),
+            )).scalars().all()
+            assert tasks == []
     finally:
         await engine.dispose()
 

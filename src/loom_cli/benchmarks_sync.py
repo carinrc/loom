@@ -50,12 +50,25 @@ class PlanRow:
     reason: str
 
 
+@dataclass(frozen=True)
+class TaskCounts:
+    """Per-benchmark task-row diff outcome from one sync pass."""
+
+    inserted: int = 0
+    updated: int = 0
+    unchanged: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.inserted + self.updated + self.unchanged
+
+
 @dataclass
 class SyncPlan:
-    """Per-entry decisions + per-entry task UPSERT counts."""
+    """Per-entry decisions + per-benchmark task diff counts."""
 
     rows: list[PlanRow] = field(default_factory=list)
-    tasks_upserted: dict[str, int] = field(default_factory=dict)
+    tasks: dict[str, TaskCounts] = field(default_factory=dict)
 
     def add(
         self,
@@ -156,6 +169,18 @@ async def _sync_local(
         )
         return
 
+    task_tomls = _walk_task_tomls(source_dir)
+    if not task_tomls:
+        logger.warning(
+            "benchmarks_sync_skip kind=local id=%s reason=empty_source_dir path=%s",
+            entry.id, source_dir,
+        )
+        plan.add(
+            kind="local", id=entry.id, action="SKIP",
+            reason=f"source dir empty: {source_dir}",
+        )
+        return
+
     desired = dict(
         id=entry.id,
         display_name=entry.display_name,
@@ -190,24 +215,37 @@ async def _sync_local(
         )
         await session.commit()
 
-    tasks_count = await _sync_local_tasks(
-        entry, source_dir=source_dir, session=session, dry_run=dry_run,
+    plan.tasks[entry.id] = await _sync_local_tasks(
+        entry,
+        source_dir=source_dir,
+        task_tomls=task_tomls,
+        session=session,
+        dry_run=dry_run,
     )
-    plan.tasks_upserted[entry.id] = tasks_count
 
 
 async def _sync_local_tasks(
     entry: LocalBenchmarkEntry,
     *,
     source_dir: Path,
+    task_tomls: list[Path],
     session: AsyncSession,
     dry_run: bool,
-) -> int:
-    count = 0
-    for task_toml in _walk_task_tomls(source_dir):
+) -> TaskCounts:
+    """SELECT-first then UPSERT only when checksum differs.
+
+    Avoids O(tasks) writes on no-op re-syncs (e.g., the auto-sync
+    hook on `loom service up`). One commit at the end of the loop —
+    a 500-task benchmark sync used to issue 500 commits.
+    """
+    inserted = updated = unchanged = 0
+    did_write = False
+    for task_toml in task_tomls:
         bundle_dir = task_toml.parent
         rel = bundle_dir.relative_to(source_dir)
-        task_id = entry.id if rel == Path(".") else f"{entry.id}/{rel.as_posix()}"
+        task_id = (
+            entry.id if rel == Path(".") else f"{entry.id}/{rel.as_posix()}"
+        )
 
         try:
             with task_toml.open("rb") as f:
@@ -215,20 +253,33 @@ async def _sync_local_tasks(
             TaskConfig.model_validate(raw_cfg)
         except Exception as exc:
             raise SyncError(
-                f"invalid task.toml at {task_toml}: {exc}",
+                f"invalid task.toml at {task_toml}: {exc}. Fix the file "
+                "or remove the bundle to unblock sync.",
             ) from exc
 
         checksum = task_checksum(bundle_dir)
-        desired = dict(
-            id=task_id,
-            checksum=checksum,
-            config=raw_cfg,
-            source=f"fixture://{task_id}",
-            license=entry.license_spdx,
-            benchmark_id=entry.id,
-        )
+        existing = await _get_task(session, task_id)
+        if existing is None:
+            inserted += 1
+        elif (
+            existing.checksum != checksum
+            or existing.benchmark_id != entry.id
+            or existing.license != entry.license_spdx
+        ):
+            updated += 1
+        else:
+            unchanged += 1
+            continue  # no write needed
 
         if not dry_run:
+            desired = dict(
+                id=task_id,
+                checksum=checksum,
+                config=raw_cfg,
+                source=f"fixture://{task_id}",
+                license=entry.license_spdx,
+                benchmark_id=entry.id,
+            )
             await session.execute(
                 pg_insert(TaskRow).values(**desired).on_conflict_do_update(
                     index_elements=["id"],
@@ -241,9 +292,12 @@ async def _sync_local_tasks(
                     },
                 ),
             )
-            await session.commit()
-        count += 1
-    return count
+            did_write = True
+    if did_write:
+        await session.commit()
+    return TaskCounts(
+        inserted=inserted, updated=updated, unchanged=unchanged,
+    )
 
 
 def _walk_task_tomls(source_dir: Path) -> list[Path]:
@@ -285,6 +339,13 @@ async def _get_benchmark(
 ) -> Benchmark | None:
     result = await session.execute(
         select(Benchmark).where(Benchmark.id == benchmark_id),
+    )
+    return result.scalar_one_or_none()
+
+
+async def _get_task(session: AsyncSession, task_id: str) -> TaskRow | None:
+    result = await session.execute(
+        select(TaskRow).where(TaskRow.id == task_id),
     )
     return result.scalar_one_or_none()
 

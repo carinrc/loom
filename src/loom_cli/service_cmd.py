@@ -155,19 +155,21 @@ def _benchmarks_sync_config(db_url: str) -> None:
     log a WARN but don't fail `service up` — the registry layer is
     not on the critical path.
     """
-    config_path = Path.cwd() / "config" / "benchmarks.toml"
-    if not config_path.exists():
+    from loom_cli.datasets_cmd import _resolve_config_path
+
+    config_path = _resolve_config_path(None)
+    if config_path is None:
         return
     fixtures_root = os.environ.get("LOOM_WORKER_FIXTURES_ROOT")
     if not fixtures_root:
         sys.stderr.write(
-            "warning: config/benchmarks.toml present but "
+            f"warning: {config_path} present but "
             "LOOM_WORKER_FIXTURES_ROOT not set — skipping benchmarks "
             "sync. Set the env var to the dir holding "
             "<benchmark-id>/<task>/ bundles.\n",
         )
         return
-    print("→ syncing config/benchmarks.toml")
+    print(f"→ syncing {config_path}")
     env = os.environ.copy()
     env["LOOM_DB_URL"] = db_url
     rc = subprocess.run(

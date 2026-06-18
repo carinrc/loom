@@ -631,8 +631,9 @@ def test_chat_byo_upstream_error_redacts_authorization_header(  # type: ignore[n
 ):
     """Upstream error bodies can echo provider Authorization headers.
 
-    The gateway must not let provider Authorization values reach logs or
-    user-visible error text when a BYO provider call fails.
+    The gateway preserves the upstream status code, but must not let provider
+    Authorization values reach logs or user-visible error text when a BYO
+    provider call fails.
     """
     app, _captured = app_with_byo
     team_id, raw_token = seed_data
@@ -672,7 +673,7 @@ def test_chat_byo_upstream_error_redacts_authorization_header(  # type: ignore[n
             },
         )
 
-    assert r.status_code == 502
+    assert r.status_code == 401
     combined = "\n".join(
         [r.text, *(record.getMessage() for record in caplog.records)],
     )

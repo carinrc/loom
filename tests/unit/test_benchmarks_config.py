@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from loom_cli.benchmarks_config import (
+from loom.config.benchmarks import (
     BenchmarksConfig,
     LocalBenchmarkEntry,
     RemapBenchmarkEntry,

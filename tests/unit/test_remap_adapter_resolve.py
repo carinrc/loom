@@ -146,3 +146,99 @@ def test_resolve_with_no_toml_and_unknown_benchmark_raises(
         _resolve_adapter(
             "unknown", benchmarks_config_path=tmp_path / "nope.toml",
         )
+
+
+def test_resolve_remap_overrides_display_name(
+    tmp_path: Path, stub_humaneval: _StubAdapter,
+) -> None:
+    """Regression for #234 review: import_cmd writes `display_name`
+    from the resolved adapter, so the remap's display_name MUST be
+    surfaced on the adapter — otherwise an import-before-sync flow
+    would write the base's display_name into the benchmarks row.
+    """
+    cfg = _write_toml(tmp_path, """\
+schema_version = 1
+
+[[remap]]
+id = "humaneval-fork-display"
+inherit = "humaneval"
+display_name = "HumanEval (fork display)"
+upstream_kind = "huggingface"
+upstream_locator = "x/y"
+license_spdx = "MIT"
+license_url = "https://example.org/L"
+""")
+    remapped = _resolve_adapter(
+        "humaneval-fork-display", benchmarks_config_path=cfg,
+    )
+    assert remapped.display_name == "HumanEval (fork display)"
+    # Base is untouched
+    assert stub_humaneval.display_name == "HumanEval"
+
+
+class _WritingStubAdapter:
+    """Adapter whose `convert_instance` actually exercises `self.name`
+    so we can assert it ends up in the on-disk task.toml + the
+    returned ConvertedTask.task_id."""
+
+    name = "stub-base"
+    display_name = "Stub"
+    upstream_source = UpstreamSource(kind="huggingface", locator="stub/base")
+    license_spdx = "MIT"
+    license_url = "https://example.org/L"
+    series = "stub"
+    splits: tuple[str, ...] = ("test",)
+
+    def list_instances(self, *, source_dir: Path, split: str):  # type: ignore[no-untyped-def]
+        return iter(())
+
+    def convert_instance(self, instance, *, out_dir: Path):  # type: ignore[no-untyped-def]
+        # Exercise the exact pattern HumanEval / SWE-Bench use.
+        task_id = f"{self.name}/{instance['id']}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "task.toml").write_text(
+            f'schema_version = "1"\n'
+            f"[task]\n"
+            f'id = "{task_id}"\n',
+        )
+        from loom_benchmarks.base import ConvertedTask
+        return ConvertedTask(
+            task_id=task_id, checksum="x" * 64,
+            license_spdx=self.license_spdx, warnings=(),
+        )
+
+
+def test_remap_propagates_into_convert_instance_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: after remap resolution, calling convert_instance on
+    the remapped adapter writes the remap's id into the on-disk task.toml
+    AND the returned ConvertedTask. Guards against future refactors that
+    might read cls.name instead of self.name and silently break remaps.
+    """
+    monkeypatch.setitem(REGISTRY, "stub-base", _WritingStubAdapter())
+    cfg = _write_toml(tmp_path, """\
+schema_version = 1
+
+[[remap]]
+id = "stub-remap"
+inherit = "stub-base"
+display_name = "Stub Remap"
+upstream_kind = "huggingface"
+upstream_locator = "stub/fork"
+license_spdx = "MIT"
+license_url = "https://example.org/L"
+""")
+    remapped = _resolve_adapter(
+        "stub-remap", benchmarks_config_path=cfg,
+    )
+    out_dir = tmp_path / "out"
+    converted = remapped.convert_instance({"id": "ex1"}, out_dir=out_dir)
+
+    assert converted.task_id == "stub-remap/ex1"
+    on_disk = (out_dir / "task.toml").read_text()
+    assert 'id = "stub-remap/ex1"' in on_disk
+    # And the base must NOT have leaked the override (deepcopy guard).
+    base = REGISTRY["stub-base"]
+    assert base.name == "stub-base"
+    assert base.upstream_source.locator == "stub/base"

@@ -107,9 +107,14 @@ def _resolve_adapter(
             f"which is not in REGISTRY (available: {sorted(REGISTRY)})",
         )
     base = REGISTRY[remap.inherit]
-    remapped = copy.copy(base)
+    # deepcopy guards against adapters that ever cache state on the
+    # instance — `copy.copy` would have aliased mutable instance attrs
+    # back to the base. Current adapters are class-attr-only so the cost
+    # is negligible.
+    remapped = copy.deepcopy(base)
     # Instance-level overrides shadow class attrs from CatalogBackedAdapter.
     remapped.name = remap.id
+    remapped.display_name = remap.display_name
     remapped.upstream_source = UpstreamSource(
         kind=remap.upstream_kind, locator=remap.upstream_locator,
     )

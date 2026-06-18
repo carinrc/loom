@@ -61,6 +61,14 @@ cluster = [
 vllm = [
   "vllm>=0.6,<1.0",
 ]
+# `loom_egress_xds` standalone process — Envoy egress proxy control
+# plane (#78 Phase C). Optional because operators without sandbox
+# isolation OR gateway IP allowlist don't need it; the deps add
+# Envoy/xDS protobufs (~5 MB) + `xds-protos` to pin gRPC version.
+egress-xds = [
+  "envoy-data-plane>=2.0,<3.0",
+  "xds-protos>=1.81,<2.0",
+]
 dev = [
   "hypothesis>=6.100,<7.0",
   "mypy>=1.10,<2.0",

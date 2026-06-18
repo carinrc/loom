@@ -30,6 +30,15 @@ _KEBAB = r"^[a-z0-9][a-z0-9-]*$"
 
 LOOM_BENCHMARKS_CONFIG_PATH = "LOOM_BENCHMARKS_CONFIG_PATH"
 
+__all__ = [
+    "LOOM_BENCHMARKS_CONFIG_PATH",
+    "BenchmarksConfig",
+    "LocalBenchmarkEntry",
+    "RemapBenchmarkEntry",
+    "load_benchmarks_config",
+    "resolve_config_path",
+]
+
 
 class LocalBenchmarkEntry(BaseModel):
     """A folder of `task.toml` bundles to register as a benchmark.
@@ -101,10 +110,15 @@ def resolve_config_path(explicit: Path | None = None) -> Path | None:
     the caller can no-op cleanly (matches v3 plan: missing file = exit 0).
 
     Resolution order:
-    1. `explicit` arg (CLI flag)
+    1. `explicit` arg from caller
     2. `$LOOM_BENCHMARKS_CONFIG_PATH` env
     3. `<CWD>/config/benchmarks.toml` (dev convention)
     4. `/etc/loom/benchmarks.toml` (prod FHS)
+
+    The env-var branch is fail-fast: if `$LOOM_BENCHMARKS_CONFIG_PATH`
+    is set but points at a missing file, return None — do NOT silently
+    fall through to the cwd / /etc lookup. Operator who set the env
+    var explicitly is telling us *that* file or nothing.
     """
     if explicit is not None:
         return explicit if explicit.exists() else None

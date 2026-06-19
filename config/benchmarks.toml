@@ -1,11 +1,13 @@
-# Operator-facing benchmark registry — closes #234.
+# Operator-facing benchmark registry.
 #
-# Copy this file to `config/benchmarks.toml` (dev) or
-# `/etc/loom/benchmarks.toml` (production) — or point at any other
-# path with `LOOM_BENCHMARKS_CONFIG_PATH`. Sync runs automatically
-# on `loom service up` (dev) or on demand via:
+# Ships empty (everything commented) — uncomment one of the templates
+# below to register a benchmark. Sync runs automatically on
+# `loom service up` (dev) or on demand via:
 #
 #     loom datasets sync-config [--dry-run]
+#
+# In production, copy to /etc/loom/benchmarks.toml or override the
+# path with $LOOM_BENCHMARKS_CONFIG_PATH.
 #
 # See docs/architecture/benchmark-adapter.md under "Operator-facing
 # TOML registry" for the full schema + failure-mode table.

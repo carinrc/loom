@@ -43,6 +43,30 @@ const AGENTS_RESPONSE = {
       supported_providers: ["anthropic"],
       supported_model_sources: ["api"],
     },
+    {
+      name: "opencode",
+      needs_model: true,
+      kind: "adapter",
+      description: "Opencode CLI adapter.",
+      supported_providers: ["*"],
+      supported_model_sources: ["api", "local-server", "hf"],
+      service_mode_ready: false,
+      readiness_status: "unavailable",
+      readiness_message: "agent opencode requires executable opencode",
+      runtime_contract: {
+        execution: "subprocess-adapter",
+        capture: "stdout_jsonl",
+        required_executables: ["opencode"],
+        required_python_modules: [],
+        required_packages: ["opencode-ai"],
+        endpoint_dialect: "openai_chat",
+        api_key_env: "OPENAI_API_KEY",
+        base_url_env: "OPENAI_BASE_URL",
+        model_name_template: "openai/{model_id}",
+        sandbox_network: "gateway",
+        install_hint: "Provision executable opencode before enabling agent opencode.",
+      },
+    },
   ],
 };
 
@@ -303,6 +327,24 @@ describe("NewBatch", () => {
     vi.restoreAllMocks();
   });
 
+  it("labels launch controls with human-readable sections", async () => {
+    mockEndpoints({ matchingTasks: 12 });
+    renderWithProviders(<NewBatch />);
+    await screen.findByText(/Runs solution\/solve.sh/i);
+
+    expect(screen.getByText("Task selection")).toBeInTheDocument();
+    expect(screen.getByText("Agent/model combinations")).toBeInTheDocument();
+    expect(screen.getByText("Advanced trial settings")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Shared settings applied to every trial unless a combination overrides them/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Which tasks")).not.toBeInTheDocument();
+    expect(screen.queryByText("Combinations")).not.toBeInTheDocument();
+    expect(screen.queryByText("Advanced options")).not.toBeInTheDocument();
+  });
+
   it("defaults backend to docker once the catalog loads", async () => {
     mockEndpoints({ matchingTasks: 12 });
     renderWithProviders(<NewBatch />);
@@ -311,6 +353,21 @@ describe("NewBatch", () => {
       "Backend",
     )) as HTMLSelectElement;
     expect(dropdown.value).toBe("docker");
+  });
+
+  it("marks agents without service runtime as setup-needed", async () => {
+    mockEndpoints({ matchingTasks: 12 });
+    renderWithProviders(<NewBatch />);
+
+    const unavailable = await screen.findByRole("option", {
+      name: /opencode .*setup needed/i,
+    });
+
+    expect(unavailable).toBeDisabled();
+    expect(unavailable).toHaveAttribute(
+      "title",
+      expect.stringContaining("executable opencode"),
+    );
   });
 
   it("blocks submit when no benchmark is picked", async () => {
@@ -515,7 +572,7 @@ describe("NewBatch", () => {
     await pickBackend();
     await pickBenchmark();
     await screen.findByText(/12 tasks match across 1 benchmark/i);
-    await user.click(screen.getByText(/Advanced options/i));
+    await user.click(screen.getByText(/Advanced trial settings/i));
     const maxAttempts = screen.getByLabelText(/Max attempts/i);
     await user.clear(maxAttempts);
     await user.type(maxAttempts, "5");
@@ -537,7 +594,7 @@ describe("NewBatch", () => {
     await pickBackend();
     await pickBenchmark();
     await screen.findByText(/12 tasks match across 1 benchmark/i);
-    await user.click(screen.getByText(/Advanced options/i));
+    await user.click(screen.getByText(/Advanced trial settings/i));
     await user.click(
       screen.getByRole("checkbox", { name: /Worker crash/i }),
     );
@@ -733,7 +790,11 @@ describe("NewBatch", () => {
       "11111111-1111-4111-8111-111111111111",
     );
 
-    await user.click(screen.getByRole("checkbox", { name: /Show raw/i }));
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /Include hidden\/discovered models/i,
+      }),
+    );
     expect(
       await screen.findByRole("option", {
         name: /amap-coordinate-convert.*classifier-non-llm/i,
@@ -742,10 +803,10 @@ describe("NewBatch", () => {
 
     await user.selectOptions(
       screen.getByLabelText(/^Model$/i),
-      screen.getByRole("option", { name: /Manual model/i }),
+      screen.getByRole("option", { name: /Ad-hoc model ID/i }),
     );
     await user.type(
-      screen.getByLabelText(/^Manual model id$/i),
+      await screen.findByPlaceholderText("manual-vllm-checkpoint"),
       "manual-vllm-checkpoint",
     );
     await user.click(screen.getByRole("button", { name: SUBMIT_BTN }));

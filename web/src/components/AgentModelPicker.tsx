@@ -35,6 +35,11 @@ import {
   type ModelEntry,
   type ProviderConnectionEntry,
 } from "../api/client";
+import {
+  agentReadinessMessage,
+  agentServiceModeReady,
+  type AgentReadinessLike,
+} from "../lib/agentReadiness";
 import { Button } from "./Button";
 import { Input } from "./Input";
 
@@ -62,13 +67,14 @@ export interface AgentModelPickerProps {
   disabled?: boolean;
 }
 
-interface AgentEntry {
+interface AgentEntry extends AgentReadinessLike {
   name: string;
   needs_model: boolean;
   kind: "builtin" | "adapter";
   description: string;
   supported_providers: string[];
   supported_model_sources: string[];
+  readiness_status?: "ready" | "unavailable";
 }
 
 interface LocalServerEntry {
@@ -136,13 +142,12 @@ export function AgentModelPicker({
   // current `agentName` isn't in it.
   useEffect(() => {
     if (!agents.data) return;
-    if (
-      value.agentName &&
-      agents.data.items.some((a) => a.name === value.agentName)
-    ) {
+    const current = agents.data.items.find((a) => a.name === value.agentName);
+    if (current && agentServiceModeReady(current)) {
       return;
     }
-    const first = agents.data.items[0];
+    const first = agents.data.items.find(agentServiceModeReady)
+      ?? agents.data.items[0];
     if (!first) return;
     const firstSource = (first.supported_model_sources[0] as ModelSource) ?? "api";
     onChange({
@@ -234,6 +239,9 @@ export function AgentModelPicker({
   }, [models.data, selectedAgent]);
 
   const needsModel = selectedAgent?.needs_model ?? true;
+  const selectedAgentReady = selectedAgent
+    ? agentServiceModeReady(selectedAgent)
+    : true;
 
   const inCatalog = useMemo(() => {
     if (!models.data) return false;
@@ -376,7 +384,7 @@ export function AgentModelPicker({
         </label>
         <label
           className="flex items-center gap-2 pb-2 text-sm text-slate-700"
-          title="Include raw discovered models that may be hidden from the default picker."
+          title="Include models discovered from the provider that are hidden from the default picker because they are not recommended, not agent-capable, or operator-hidden."
         >
           <input
             type="checkbox"
@@ -385,7 +393,7 @@ export function AgentModelPicker({
             disabled={disabled}
             className="h-4 w-4 rounded border-slate-300"
           />
-          <span>Show raw</span>
+          <span>Include hidden/discovered models</span>
         </label>
       </div>
 
@@ -395,7 +403,7 @@ export function AgentModelPicker({
         </span>
         <select
           aria-label="Model"
-          title="Choose a discovered model, or switch to Manual model for an ad-hoc id."
+          title="Choose a discovered model, or use an ad-hoc model ID for the selected provider connection."
           className={SELECT_CLS}
           value={selectedModelKey}
           disabled={
@@ -438,7 +446,7 @@ export function AgentModelPicker({
                 {showRaw && m.hidden_reason ? ` (${m.hidden_reason})` : ""}
               </option>
             ))}
-          <option value={CUSTOM_MODEL_KEY}>Manual model…</option>
+          <option value={CUSTOM_MODEL_KEY}>Ad-hoc model ID...</option>
         </select>
       </label>
       {customMode ? (
@@ -446,7 +454,7 @@ export function AgentModelPicker({
           {selectedConnection ? (
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-500">
-                Manual model id
+                Ad-hoc model ID
               </span>
               <Input
                 value={value.modelName}
@@ -462,6 +470,10 @@ export function AgentModelPicker({
                 placeholder="manual-vllm-checkpoint"
                 disabled={disabled}
               />
+              <p className="mt-1 text-xs text-slate-500">
+                Use this for a model ID that exists on the selected provider
+                connection but has not been discovered or added to the catalog yet.
+              </p>
             </label>
           ) : (
             <div className="grid grid-cols-2 gap-2">
@@ -660,6 +672,7 @@ export function AgentModelPicker({
               onChange({ ...value, agentName: e.target.value });
               return;
             }
+            if (!agentServiceModeReady(next)) return;
             const nextSource =
               (next.supported_model_sources[0] as ModelSource) ?? "api";
             onChange({
@@ -679,21 +692,35 @@ export function AgentModelPicker({
           {agents.isPending ? (
             <option value="">Loading…</option>
           ) : (
-            agentList.map((a) => (
-              <option key={a.name} value={a.name}>
-                {a.name}
-              </option>
-            ))
+            agentList.map((a) => {
+              const ready = agentServiceModeReady(a);
+              const reason = ready ? a.description : agentReadinessMessage(a);
+              return (
+                <option
+                  key={a.name}
+                  value={a.name}
+                  disabled={!ready}
+                  title={reason}
+                >
+                  {a.name}{ready ? "" : " (setup needed)"}
+                </option>
+              );
+            })
           )}
         </select>
-        {selectedAgent ? (
+        {selectedAgent && selectedAgentReady ? (
           <p className="mt-1 text-xs text-slate-500">
             {selectedAgent.description}
           </p>
         ) : null}
+        {selectedAgent && !selectedAgentReady ? (
+          <p className="mt-1 text-xs text-amber-700">
+            Setup needed: {agentReadinessMessage(selectedAgent)}
+          </p>
+        ) : null}
       </label>
 
-      {needsModel ? (
+      {!selectedAgentReady ? null : needsModel ? (
         <div className="space-y-3">
           {availableSources.length > 1 ? (
             <div

@@ -90,6 +90,29 @@ Running the local service stack requires Docker CLI with the Compose
 plugin; on macOS, install and start Docker Desktop, then verify
 `docker compose version` before `loom service up`.
 
+## Default views and diagnostics
+
+The SPA defaults to readable summaries instead of raw API payloads.
+New Batch explains task selection, agent/model combinations, backend,
+and advanced trial settings in product terms. Batch Detail shows a
+Run plan, Monitor shows planned trials and evaluator score, and Trial
+Detail separates platform outcome from evaluator reward.
+
+Raw data is still available when you need to debug or reproduce an API
+request. Look for `Diagnostics`, `Raw event data`, or explicit
+advanced disclosures. Those panels contain internal field names such
+as `task_filter`, `trial_config`, trajectory event payloads,
+fan-out errors, and rate-card payloads. They are intentionally closed
+by default so the normal workflow stays focused on what was launched,
+what is running, and what needs attention.
+
+Provider pages use the same model. A connection marked `Ready` means
+the last provider test passed. `Needs attention` means the last test
+failed and batches using that connection may fail. `Untested` means
+the connection has been saved but should be tested before real runs.
+Allowed-model summaries distinguish unrestricted discovered models
+from explicit allow-lists.
+
 ## Cloud sandboxes (Daytona)
 
 ```bash
@@ -440,6 +463,29 @@ loom run
   ships 11 concrete adapters (claude-code, codex, openhands, aider,
   opencode, swe-agent, mini-swe-agent, openhands-sdk, gemini-cli,
   qwen-cli, kimi-cli)
+
+In service mode, the SPA and API only allow launch for agents whose
+runtime is ready in the deployed worker/sandbox contract. `GET
+/api/v1/agents` includes `service_mode_ready`, `readiness_message`, and
+`runtime_contract` metadata. The New batch form marks unavailable
+agents as `setup needed`, and submit routes reject bypassed requests
+with the same setup message instead of creating a batch that can only
+fail in the worker.
+
+Before enabling an external agent runtime, audit the sandbox image that
+will run the task:
+
+```bash
+loom agents audit-runtime --image python:3.11-slim
+loom agents audit-runtime --image my-agent-sandbox:dev --agent opencode --json
+```
+
+The command exits `0` only when every audited agent is ready. It exits
+`1` when any agent is still `blocked` by missing dependencies or `gated`
+by the catalog readiness flag, and `2` for usage errors such as an
+unknown agent name. A passing audit proves dependency presence; close the
+loop with a normal trial or batch smoke before treating the agent as
+fully supported.
 
 ## Rate cards
 

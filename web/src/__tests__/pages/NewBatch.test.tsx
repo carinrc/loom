@@ -327,6 +327,24 @@ describe("NewBatch", () => {
     vi.restoreAllMocks();
   });
 
+  it("labels launch controls with human-readable sections", async () => {
+    mockEndpoints({ matchingTasks: 12 });
+    renderWithProviders(<NewBatch />);
+    await screen.findByText(/Runs solution\/solve.sh/i);
+
+    expect(screen.getByText("Task selection")).toBeInTheDocument();
+    expect(screen.getByText("Agent/model combinations")).toBeInTheDocument();
+    expect(screen.getByText("Advanced trial settings")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Shared settings applied to every trial unless a combination overrides them/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Which tasks")).not.toBeInTheDocument();
+    expect(screen.queryByText("Combinations")).not.toBeInTheDocument();
+    expect(screen.queryByText("Advanced options")).not.toBeInTheDocument();
+  });
+
   it("defaults backend to docker once the catalog loads", async () => {
     mockEndpoints({ matchingTasks: 12 });
     renderWithProviders(<NewBatch />);
@@ -554,7 +572,7 @@ describe("NewBatch", () => {
     await pickBackend();
     await pickBenchmark();
     await screen.findByText(/12 tasks match across 1 benchmark/i);
-    await user.click(screen.getByText(/Advanced options/i));
+    await user.click(screen.getByText(/Advanced trial settings/i));
     const maxAttempts = screen.getByLabelText(/Max attempts/i);
     await user.clear(maxAttempts);
     await user.type(maxAttempts, "5");
@@ -576,7 +594,7 @@ describe("NewBatch", () => {
     await pickBackend();
     await pickBenchmark();
     await screen.findByText(/12 tasks match across 1 benchmark/i);
-    await user.click(screen.getByText(/Advanced options/i));
+    await user.click(screen.getByText(/Advanced trial settings/i));
     await user.click(
       screen.getByRole("checkbox", { name: /Worker crash/i }),
     );

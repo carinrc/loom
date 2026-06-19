@@ -273,13 +273,13 @@ _ADAPTER_REQUIRED_PACKAGES: dict[str, tuple[str, ...]] = {
     "claude-code": ("@anthropic-ai/claude-code",),
     "codex": ("@openai/codex",),
     "gemini-cli": ("@google/gemini-cli",),
-    "kimi-cli": ("kimi-cli",),
+    "kimi-cli": ("@moonshot-ai/kimi-code",),
     "mini-swe-agent": ("mini-swe-agent",),
-    "opencode": ("opencode",),
+    "opencode": ("opencode-ai",),
     "openhands": ("openhands-ai",),
     "openhands-sdk": ("openhands-ai",),
     "qwen-cli": ("@qwen-code/qwen-code",),
-    "swe-agent": ("swe-agent",),
+    "swe-agent": ("git+https://github.com/SWE-agent/SWE-agent",),
 }
 
 

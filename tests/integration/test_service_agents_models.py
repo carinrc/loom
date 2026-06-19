@@ -219,6 +219,7 @@ async def test_agents_includes_builtins_and_adapters(
     assert opencode["readiness_status"] == "unavailable"
     assert "opencode" in opencode["readiness_message"]
     assert opencode["runtime_contract"]["required_executables"] == ["opencode"]
+    assert opencode["runtime_contract"]["required_packages"] == ["opencode-ai"]
     assert opencode["runtime_contract"]["capture"] == "stdout_jsonl"
     assert opencode["runtime_contract"]["endpoint_dialect"] == "openai_chat"
 

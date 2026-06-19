@@ -58,7 +58,7 @@ const AGENTS_RESPONSE = {
         capture: "stdout_jsonl",
         required_executables: ["opencode"],
         required_python_modules: [],
-        required_packages: ["opencode"],
+        required_packages: ["opencode-ai"],
         endpoint_dialect: "openai_chat",
         api_key_env: "OPENAI_API_KEY",
         base_url_env: "OPENAI_BASE_URL",

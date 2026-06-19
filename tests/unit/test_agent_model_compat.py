@@ -183,6 +183,20 @@ def test_catalog_entries_include_service_mode_runtime_contract() -> None:
         assert "base_url_env" in contract
 
 
+def test_catalog_package_hints_use_verified_install_sources() -> None:
+    by_name = {agent.name: agent.to_dict() for agent in list_agents()}
+
+    assert by_name["opencode"]["runtime_contract"]["required_packages"] == [
+        "opencode-ai",
+    ]
+    assert by_name["kimi-cli"]["runtime_contract"]["required_packages"] == [
+        "@moonshot-ai/kimi-code",
+    ]
+    assert by_name["swe-agent"]["runtime_contract"]["required_packages"] == [
+        "git+https://github.com/SWE-agent/SWE-agent",
+    ]
+
+
 def test_opencode_runtime_not_ready_rejects_before_worker() -> None:
     err = validate_agent_model_compat(
         "opencode",

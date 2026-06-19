@@ -314,6 +314,22 @@ conflict):
 3. **catalog** — `src/loom_cli/catalog_data/default-catalog.json`
    (override via `--catalog-url` or `LOOM_CATALOG_URL`)
 
+### Operator-registered benchmarks via `config/benchmarks.toml`
+
+Operators can register two non-adapter benchmark shapes without
+writing Python (#234):
+
+- **`[[local]]`** — point at a folder of `task.toml` bundles on the
+  worker's `fixtures_root`. The folder becomes a benchmark; each
+  bundle becomes a task.
+- **`[[remap]]`** — reuse an existing adapter's parsing against a
+  different upstream (e.g., a HumanEval fork).
+
+Both flow through `loom datasets sync-config` (manual) and
+`loom service up` (automatic, dev compose only). See
+[architecture/benchmark-adapter.md](architecture/benchmark-adapter.md#operator-facing-toml-registry-configbenchmarkstoml)
+for the schema and worked examples.
+
 ## `loom config` reference
 
 Config persists to `$XDG_CONFIG_HOME/loom/config.toml` (defaults to

@@ -790,7 +790,11 @@ describe("NewBatch", () => {
       "11111111-1111-4111-8111-111111111111",
     );
 
-    await user.click(screen.getByRole("checkbox", { name: /Show raw/i }));
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /Include hidden\/discovered models/i,
+      }),
+    );
     expect(
       await screen.findByRole("option", {
         name: /amap-coordinate-convert.*classifier-non-llm/i,
@@ -799,10 +803,10 @@ describe("NewBatch", () => {
 
     await user.selectOptions(
       screen.getByLabelText(/^Model$/i),
-      screen.getByRole("option", { name: /Manual model/i }),
+      screen.getByRole("option", { name: /Ad-hoc model ID/i }),
     );
     await user.type(
-      screen.getByLabelText(/^Manual model id$/i),
+      await screen.findByPlaceholderText("manual-vllm-checkpoint"),
       "manual-vllm-checkpoint",
     );
     await user.click(screen.getByRole("button", { name: SUBMIT_BTN }));

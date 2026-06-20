@@ -71,12 +71,12 @@ loom agents audit-runtime --image loom-agent-sandbox:dev --json
 the displayed catalog spans both Python-module agents and modern Node
 CLIs. Python CLI-only agents such as `aider` and `mini-swe-agent` are
 installed in isolated virtual environments and linked onto `PATH` so
-their pinned dependencies do not conflict with OpenHands. A successful
-image build or dependency audit does not by itself make an agent ready:
-the catalog should stay gated until a platform-dev trial smoke passes.
-As of this slice, `openhands-sdk` remains blocked because the adapter
-expects `openhands_sdk.run`, while current OpenHands SDK packages expose
-the `openhands.sdk` library but no such one-shot runner.
+their pinned dependencies do not conflict with OpenHands. The
+`openhands-sdk` adapter uses Loom's `loom_launcher.openhands_sdk_runner`
+module because upstream OpenHands SDK exposes a Python library rather than
+a stable one-shot CLI. A successful image build or dependency audit does
+not by itself make an agent ready: the catalog should stay gated until a
+platform-dev trial smoke passes.
 
 ## Process model
 

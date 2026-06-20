@@ -195,6 +195,13 @@ def test_catalog_package_hints_use_verified_install_sources() -> None:
     assert by_name["swe-agent"]["runtime_contract"]["required_packages"] == [
         "git+https://github.com/SWE-agent/SWE-agent",
     ]
+    assert by_name["openhands-sdk"]["runtime_contract"]["required_python_modules"] == [
+        "loom_launcher.openhands_sdk_runner",
+        "openhands.sdk",
+    ]
+    assert by_name["openhands-sdk"]["runtime_contract"]["required_packages"] == [
+        "openhands-sdk",
+    ]
 
 
 def test_opencode_runtime_not_ready_rejects_before_worker() -> None:

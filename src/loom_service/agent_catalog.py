@@ -263,7 +263,7 @@ _ADAPTER_REQUIRED_EXECUTABLES: dict[str, tuple[str, ...]] = {
 
 _ADAPTER_REQUIRED_PYTHON_MODULES: dict[str, tuple[str, ...]] = {
     "openhands": ("openhands.server",),
-    "openhands-sdk": ("openhands_sdk.run",),
+    "openhands-sdk": ("loom_launcher.openhands_sdk_runner", "openhands.sdk"),
     "swe-agent": ("sweagent.run.run_single",),
 }
 
@@ -277,7 +277,7 @@ _ADAPTER_REQUIRED_PACKAGES: dict[str, tuple[str, ...]] = {
     "mini-swe-agent": ("mini-swe-agent",),
     "opencode": ("opencode-ai",),
     "openhands": ("openhands-ai",),
-    "openhands-sdk": ("openhands-ai",),
+    "openhands-sdk": ("openhands-sdk",),
     "qwen-cli": ("@qwen-code/qwen-code",),
     "swe-agent": ("git+https://github.com/SWE-agent/SWE-agent",),
 }

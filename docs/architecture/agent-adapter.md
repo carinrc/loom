@@ -170,12 +170,12 @@ loom agents audit-runtime --image loom-agent-sandbox:dev --json
 
 The image provisions Node 22 CLI adapters (`claude`, `codex`, `gemini`,
 `kimi`, `opencode`, `qwen`) and Python runtimes for `aider`,
-`mini-swe-agent`, `openhands`, and `swe-agent`. `aider` and
-`mini-swe-agent` live in isolated virtual environments with PATH shims;
-OpenHands and SWE-agent stay importable from the main Python 3.12
-runtime because their adapters invoke `python -m ...`. SWE-agent is
-installed editable from its tagged source tree so its upstream `config/`
-layout is present at runtime.
+`mini-swe-agent`, `openhands`, `openhands-sdk`, and `swe-agent`. `aider`
+and `mini-swe-agent` live in isolated virtual environments with PATH
+shims; OpenHands, the Loom-owned OpenHands SDK runner, and SWE-agent stay
+importable from the main Python 3.12 runtime because their adapters
+invoke `python -m ...`. SWE-agent is installed editable from its tagged
+source tree so its upstream `config/` layout is present at runtime.
 
 The audit runs dependency probes inside the named Docker image and
 reports one row per displayed agent. `blocked` means an executable or
@@ -186,11 +186,11 @@ end-to-end platform-dev smoke. The command does not pull images
 implicitly; build or pull the target sandbox image first so the audit
 checks exactly what workers will run.
 
-Dependency audit findings can also expose adapter drift. Current
-OpenHands SDK wheels provide `openhands.sdk`, not the historical
-`openhands_sdk.run` module assumed by the `openhands-sdk` adapter. Keep
-that agent blocked until the adapter has a real one-shot SDK runner and
-an end-to-end smoke.
+Dependency audit findings can also expose adapter drift. The upstream
+OpenHands SDK wheels provide `openhands.sdk`, not a stable one-shot CLI;
+Loom therefore owns `loom_launcher.openhands_sdk_runner` as the adapter's
+sandbox contract. Keep the catalog entry gated until that runner also has
+a passing end-to-end platform-dev smoke.
 
 ## Adding a new agent adapter
 

@@ -99,3 +99,28 @@ def test_runner_requires_jsonl_output(monkeypatch, tmp_path, capsys) -> None:
 
     assert rc == 2
     assert "only --output jsonl is supported" in capsys.readouterr().err
+
+
+def test_runner_reports_missing_openhands_sdk(monkeypatch, tmp_path, capsys) -> None:
+    def raise_missing(name: str) -> object:
+        assert name == "openhands.sdk"
+        raise ImportError("missing")
+
+    monkeypatch.setenv("LLM_API_KEY", "step-token")
+    monkeypatch.setattr(openhands_sdk_runner.importlib, "import_module", raise_missing)
+
+    rc = openhands_sdk_runner.main(
+        [
+            "--model",
+            "openai/test-model",
+            "--workdir",
+            str(tmp_path),
+            "--output",
+            "jsonl",
+            "--task",
+            "solve it",
+        ]
+    )
+
+    assert rc == 2
+    assert "openhands-sdk is required" in capsys.readouterr().err

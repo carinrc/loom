@@ -8,6 +8,7 @@ this tiny runner so the adapter has a durable sandbox contract.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -17,9 +18,15 @@ from typing import Any
 
 def _load_sdk_types() -> tuple[type[Any], type[Any], type[Any]]:
     os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
-    from openhands.sdk import Agent, Conversation, LLM  # noqa: I001
+    try:
+        sdk = importlib.import_module("openhands.sdk")
+    except ImportError as exc:  # pragma: no cover - exercised via main()
+        raise RuntimeError(
+            "openhands-sdk is required for the openhands-sdk adapter; "
+            "install the agent sandbox runtime dependencies"
+        ) from exc
 
-    return LLM, Agent, Conversation
+    return sdk.LLM, sdk.Agent, sdk.Conversation
 
 
 def _json_default(value: object) -> object:
@@ -67,7 +74,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     base_url = os.environ.get("LLM_BASE_URL") or None
-    llm_type, agent_type, conversation_type = _load_sdk_types()
+    try:
+        llm_type, agent_type, conversation_type = _load_sdk_types()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     _emit({"kind": "status", "message": "openhands-sdk runner started"})
 

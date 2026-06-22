@@ -61,6 +61,7 @@ from loom_worker.sandbox_singleton import (
 )
 from loom_worker.signal_handler import ShutdownState, install_signal_handlers
 from loom_worker.task_image import TaskImageBuildError, resolve_task_image
+from loom_worker.trial_cache import TrialCacheError, resolve_trial_image
 from loom_worker.trial_runner import AgentFactory, LocalTrialRunner
 from loom_worker.vllm_registry import WorkerVLLMRegistry
 
@@ -317,6 +318,46 @@ async def _claim_available_trials(
     return claimed
 
 
+async def _resolve_layered_trial_image(
+    *,
+    task_image: str,
+    agent_name: str,
+    settings: WorkerSettings,
+    cp_client: HttpControlPlaneClient,
+    worker_id: UUID,
+) -> str:
+    """Look up the agent adapter and, if it declares an install_script,
+    return the cached layered image (or build it). Returns `task_image`
+    unchanged for agents without an install_script (oracle, litellm,
+    in-box, or adapters that haven't migrated to #317 yet — Phase 2
+    expands coverage)."""
+    # Mirror _default_agent_factory's alias for the in-box variant.
+    adapter_name = (
+        "claude-code" if agent_name == "claude-code-inbox" else agent_name
+    )
+    # Built-in agents (oracle, litellm) aren't in the launcher registry
+    # and don't need an install step. Skip.
+    if adapter_name in {"oracle", "litellm"}:
+        return task_image
+    try:
+        from loom_launcher import get_adapter
+    except ImportError:
+        return task_image
+    adapter = get_adapter(adapter_name)
+    if adapter is None:
+        # Unknown name — let `_default_agent_factory` raise AgentError
+        # at agent-spawn time with the existing "unknown agent.name"
+        # message. Don't duplicate that here.
+        return task_image
+    return await resolve_trial_image(
+        task_image=task_image,
+        adapter=adapter,
+        settings=settings,
+        cp_client=cp_client,
+        worker_id=worker_id,
+    )
+
+
 async def _spawn_trial(
     *,
     pool: RunnerPool,
@@ -358,12 +399,25 @@ async def _spawn_trial(
                 task_dir=task_dir,
                 task_checksum=task_checksum,
             )
+            # #317 Phase 1: if the chosen agent declares an
+            # install_script, layer the agent install onto the task
+            # image and run against the cached layered tag instead.
+            # Build is content-addressed + cluster-shared via the
+            # active_trial_cache_builds slot table.
+            task_image = await _resolve_layered_trial_image(
+                task_image=task_image,
+                agent_name=trial_config.agent_name,
+                settings=settings,
+                cp_client=cp_client,
+                worker_id=worker_id,
+            )
         except (
             httpx.HTTPError,
             ValidationError,
             OSError,
             ValueError,
             TaskImageBuildError,
+            TrialCacheError,
         ) as exc:
             if task_dir is not None:
                 shutil.rmtree(task_dir, ignore_errors=True)

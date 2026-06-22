@@ -672,6 +672,37 @@ class ProviderModelCache(Base):
     last_seen_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now(), nullable=False,
     )
+
+    # NOTE: the ActiveTrialCacheBuild model is appended at end-of-file.
     upstream_present: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true"),
+    )
+
+
+class ActiveTrialCacheBuild(Base):
+    """One row per in-progress cache build for a (task_image_digest,
+    install_script) combination (#317 Phase 1).
+
+    Workers claim a slot here before docker-building the layered
+    image; subsequent workers see the slot and wait via cheap SELECT
+    polling. Crash safety via `expires_at`: when a builder's process
+    dies, its heartbeat task stops refreshing the TTL; within ~60s
+    the slot expires and another worker can steal it via
+    `INSERT ON CONFLICT WHERE expires_at < now()`.
+
+    NOT a Postgres advisory lock — those tie up a CP connection for
+    the build duration; with N waiters that exhausts the CP pool.
+    This table uses short transactions only (claim, exists, refresh,
+    release each are one statement).
+    """
+    __tablename__ = "active_trial_cache_builds"
+    cache_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    builder_worker_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), nullable=False,
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now(),
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False,
     )

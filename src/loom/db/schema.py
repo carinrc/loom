@@ -672,8 +672,6 @@ class ProviderModelCache(Base):
     last_seen_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now(), nullable=False,
     )
-
-    # NOTE: the ActiveTrialCacheBuild model is appended at end-of-file.
     upstream_present: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true"),
     )

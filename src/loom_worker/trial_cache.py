@@ -249,7 +249,12 @@ async def resolve_trial_image(
          the next worker from rebuilding).
     6. Return the layered image tag.
     """
-    install_script = _normalize_install_script(adapter.install_script)
+    # Phase 1 adapters (aider, claude-code, openhands) declare
+    # install_script; the 9 legacy adapters don't yet — treat the
+    # missing attribute as "no install needed" until Phase 2 lands.
+    install_script = _normalize_install_script(
+        getattr(adapter, "install_script", None),
+    )
     if install_script is None:
         return task_image
 
@@ -273,7 +278,7 @@ async def resolve_trial_image(
     )
 
     # Step 4: local hit?
-    if _image_exists_locally(client, local_tag):
+    if await asyncio.to_thread(_image_exists_locally, client, local_tag):
         return local_tag
 
     # Step 5: claim or wait for a builder slot.

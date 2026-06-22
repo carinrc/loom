@@ -158,9 +158,9 @@ The worker's `resolve_trial_image()` runs this flow:
 
 1. Local hit → return `layered_tag` immediately.
 2. Otherwise, claim a cluster-wide builder slot from the Control
-   Plane (`POST /internal/trial-cache/claim`). Non-claimants poll
-   `GET /internal/trial-cache/{cache_key}` until the slot is released,
-   then try local + registry again.
+   Plane (`POST /api/v1/internal/trial-cache/claim`). Non-claimants
+   poll `GET /api/v1/internal/trial-cache/{cache_key}` until the slot
+   is released, then try local + registry again.
 3. With the slot held, try the optional shared registry
    (`{trial_cache_registry_repo}:<cache_key>`). On hit, pull, tag
    locally, release the slot, done.
@@ -197,12 +197,13 @@ local layered image is still produced and used for the current trial.
 
 ### Eviction
 
-Docker labels are immutable, so the worker can't do classical LRU. It
-uses a TTL prune (`trial_cache_ttl_hours`, default 168 h = 7 days)
-filtered by the `loom.trial-cache.created-at` label, plus a capacity
-backstop (`trial_cache_min_free_gb`, default 20 GB) that evicts
-oldest-by-creation entries until disk frees up. Eviction is local
-only — registry retention is the registry operator's concern.
+Docker labels are immutable post-build, so the worker can't do
+classical LRU. It uses a TTL prune (`trial_cache_ttl_hours`, default
+168 h = 7 days) filtered by the `loom.trial-cache=true` label, with
+age determined by Docker's native image-creation timestamp, plus a
+capacity backstop (`trial_cache_min_free_gb`, default 20 GB) that
+evicts oldest-by-creation entries until disk frees up. Eviction is
+local only — registry retention is the registry operator's concern.
 
 
 

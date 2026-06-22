@@ -251,6 +251,25 @@ async def test_resolve_trial_image_blank_install_returns_task_image() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_trial_image_missing_attr_returns_task_image() -> None:
+    """Phase 1 ships install_script on 3 adapters; the 9 legacy adapters
+    (codex, gemini-cli, etc.) don't yet declare the field. getattr-default
+    must keep them passthrough until Phase 2 adds the attribute."""
+    class _LegacyAdapter:
+        pass
+
+    out = await trial_cache.resolve_trial_image(
+        task_image="python:3.11-slim",
+        adapter=_LegacyAdapter(),  # type: ignore[arg-type]
+        settings=_StubSettings(),
+        cp_client=_StubCPClient(),
+        worker_id=uuid4(),
+        docker_client=_stub_docker(),
+    )
+    assert out == "python:3.11-slim"
+
+
+@pytest.mark.asyncio
 async def test_resolve_trial_image_local_cache_hit() -> None:
     """When the layered tag already exists locally, no claim needed."""
     digest = "sha256:base-digest"

@@ -44,7 +44,15 @@ async def claim_builder_slot(
     """Atomic claim with TTL-based expired-slot stealing.
 
     Returns True if this worker is now the builder. False if another
-    worker holds a non-expired slot. One short transaction."""
+    worker holds a non-expired slot. One short transaction.
+
+    Invariant: a worker calling claim() on its own live slot also
+    returns False. This is intentional — the `WHERE expires_at < now()`
+    clause blocks the conflict UPDATE for non-expired rows, so the
+    RETURNING is empty. Holders should never re-claim; use
+    refresh_builder_slot() to extend the TTL. Adding an "or builder_id
+    matches" branch here would let a re-claiming holder reset its
+    own started_at and break crash-recovery latency measurements."""
     expires = datetime.now(UTC) + timedelta(seconds=ttl_sec)
     result = await session.execute(text("""
         INSERT INTO active_trial_cache_builds

@@ -165,11 +165,10 @@ def test_release_owner_deletes_row(
         client, cache_key="rel-key", worker_id=str(worker_id),
         ttl_sec=30, token=worker_token,
     )
-    r = client.request(
-        "DELETE",
+    r = client.delete(
         "/api/v1/internal/trial-cache/rel-key",
         headers={"Authorization": f"Bearer {worker_token}"},
-        json={"worker_id": str(worker_id)},
+        params={"worker_id": str(worker_id)},
     )
     assert r.status_code == 204
 
@@ -192,11 +191,10 @@ def test_release_by_non_owner_is_noop(
         client, cache_key="owned", worker_id=str(owner),
         ttl_sec=30, token=worker_token,
     )
-    r = client.request(
-        "DELETE",
+    r = client.delete(
         "/api/v1/internal/trial-cache/owned",
         headers={"Authorization": f"Bearer {worker_token}"},
-        json={"worker_id": str(intruder)},
+        params={"worker_id": str(intruder)},
     )
     assert r.status_code == 204
     engine = create_engine(postgres_url)

@@ -16,11 +16,15 @@ from loom_launcher.adapter import ExecHandle, TrajectoryEventLike
 
 logger = logging.getLogger(__name__)
 
-# Maximum sample size of a malformed JSONL line included in the
-# end-of-stream synthetic event. Long enough to spot the issue
+# Maximum sample size of a single malformed JSONL line included in
+# the end-of-stream synthetic event. Long enough to spot the issue
 # (truncated JSON, raw shell error, etc.) without blowing up the
 # trajectory if an agent dumps megabytes of garbage.
 _MALFORMED_SAMPLE_BYTES = 512
+# How many distinct skipped samples to keep. Last-N strategy — we
+# want the failure tail (most likely to contain the root cause),
+# capped so a 10k-line garbage stream still fits in ~5KB.
+_MALFORMED_SAMPLE_COUNT = 10
 
 
 class _DictEvent:
@@ -68,17 +72,25 @@ async def stream_stdout_jsonl(
         {
             "kind": "stream_capture_warning",
             "skipped_lines": N,
-            "last_skip_reason": "<JSON error>",
-            "last_skip_sample": "<first bytes of the bad line>",
+            "last_skip_reason": "<JSON error from the last bad line>",
+            "last_skip_sample": "<first bytes of the last bad line>",
+            "skip_samples": [
+                {"reason": "...", "sample": "..."},   # up to 10 most recent
+                ...
+            ],
         }
 
-    SubprocessAgent uses this event to surface a useful failure_message
-    instead of leaving the trial with empty diagnostics (#321).
+    SubprocessAgent uses `last_skip_sample` for the failure_message
+    summary and persists the full `skip_samples` list to the trajectory
+    so post-hoc debugging doesn't depend on retained worker logs (#321).
     """
     buf = b""
     skipped = 0
     last_reason: str = ""
     last_sample: str = ""
+    # Ring buffer of recent skipped samples — preserved in the
+    # trajectory so operators can debug after worker logs are gone.
+    samples: list[dict[str, str]] = []
 
     def _note_skip(line: bytes, exc: json.JSONDecodeError) -> None:
         nonlocal skipped, last_reason, last_sample
@@ -87,6 +99,9 @@ async def stream_stdout_jsonl(
         last_sample = line[:_MALFORMED_SAMPLE_BYTES].decode(
             "utf-8", errors="replace",
         )
+        samples.append({"reason": last_reason, "sample": last_sample})
+        if len(samples) > _MALFORMED_SAMPLE_COUNT:
+            del samples[0]
 
     async for chunk in handle.stdout:
         buf += chunk
@@ -128,4 +143,5 @@ async def stream_stdout_jsonl(
             "skipped_lines": skipped,
             "last_skip_reason": last_reason,
             "last_skip_sample": last_sample,
+            "skip_samples": list(samples),
         })

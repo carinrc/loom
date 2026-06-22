@@ -81,6 +81,46 @@ async def test_all_malformed_emits_only_warning_event(make_handle) -> None:
     assert warn["skipped_lines"] == 2
 
 
+async def test_skip_samples_preserves_multiple_lines(make_handle) -> None:
+    """skip_samples is a ring buffer of the most recent malformed
+    lines (capped to 10 by default) so post-hoc trajectory inspection
+    doesn't depend on retained worker logs (#321)."""
+    handle = make_handle(stdout_chunks=[
+        b'first bad line\n',
+        b'second bad line\n',
+        b'{"ok": 1}\n',
+        b'third bad line\n',
+    ])
+    events = [e async for e in stream_stdout_jsonl(handle)]
+    # 1 valid event + 1 warning event
+    assert len(events) == 2
+    warn = events[1].model_dump()
+    assert warn["skipped_lines"] == 3
+    samples = warn["skip_samples"]
+    assert len(samples) == 3
+    assert "first bad line" in samples[0]["sample"]
+    assert "second bad line" in samples[1]["sample"]
+    assert "third bad line" in samples[2]["sample"]
+    # last_skip_sample still mirrors the final sample for backwards compat
+    assert "third bad line" in warn["last_skip_sample"]
+
+
+async def test_skip_samples_caps_to_ring_buffer_size(make_handle) -> None:
+    """A garbage flood (200 lines) must not balloon the trajectory —
+    we keep only the trailing _MALFORMED_SAMPLE_COUNT samples."""
+    from loom_launcher.capture import stdout_jsonl as mod
+    chunks = [f'bad line {i}\n'.encode() for i in range(200)]
+    handle = make_handle(stdout_chunks=chunks)
+    events = [e async for e in stream_stdout_jsonl(handle)]
+    warn = events[0].model_dump()
+    assert warn["skipped_lines"] == 200
+    samples = warn["skip_samples"]
+    assert len(samples) == mod._MALFORMED_SAMPLE_COUNT
+    # Should be the LAST N, not the first
+    assert "bad line 199" in samples[-1]["sample"]
+    assert "bad line 0" not in samples[0]["sample"]
+
+
 async def test_malformed_raises_when_skip_disabled(make_handle) -> None:
     handle = make_handle(stdout_chunks=[
         b'{"valid": true}\n',

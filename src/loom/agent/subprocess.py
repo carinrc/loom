@@ -33,6 +33,7 @@ from loom.errors import AgentError
 from loom.models.mcp import MCPConnection
 from loom.models.trajectory import AgentThoughtEvent, EventKind
 from loom.models.types import OS, ModelSpec
+from loom.security.redaction import redact_text
 from loom.trajectory.writer import TrajectoryWriter
 from loom_worker.control_plane_client import StepTokenClient
 
@@ -247,7 +248,10 @@ class SubprocessAgent:
         if rc != 0:
             detail = f"{self.adapter.name} exited rc={rc} on step {step_id}"
             if stderr_tail:
-                detail = f"{detail}; stderr: {stderr_tail}"
+                # Redact provider keys / bearer tokens / signed URLs
+                # from the captured stderr before it lands in the
+                # persisted failure_message (#321).
+                detail = f"{detail}; stderr: {redact_text(stderr_tail)}"
             if capture_warning is not None:
                 detail = (
                     f"{detail}; capture: skipped "
@@ -264,7 +268,11 @@ class SubprocessAgent:
         # the trial gets a real failure_message instead of a downstream
         # empty INTERNAL_ERROR.
         if useful_events == 0 and capture_warning is not None:
-            sample = capture_warning.get("last_skip_sample", "")
+            raw_sample = str(capture_warning.get("last_skip_sample", ""))
+            # last_skip_sample is the first bytes of an unparseable
+            # stdout line — could carry an env-leaked API key or other
+            # secret. Redact before it lands in failure_message.
+            sample = redact_text(raw_sample) if raw_sample else ""
             sample_text = (
                 f"; first bad line: {sample!r}" if sample else ""
             )

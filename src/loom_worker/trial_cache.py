@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 import docker
-from docker.errors import APIError, ImageNotFound, NotFound
+from docker.errors import APIError, BuildError, ImageNotFound, NotFound
 
 if TYPE_CHECKING:
     from loom_launcher.adapter import AgentAdapter
@@ -72,7 +72,9 @@ def _cache_key(*, task_image_digest: str, install_script: str) -> str:
     chars = 128 bits, comfortably collision-safe at any realistic
     Loom scale (Docker tags accept the full 64-hex; 32 chosen for
     readability)."""
-    material = (task_image_digest + install_script).encode("utf-8")
+    # NUL separator prevents (digest+script) collision between
+    # (digestA, scriptB) and (digestAscriptB-prefix, suffix).
+    material = (task_image_digest + "\x00" + install_script).encode("utf-8")
     return sha256(material).hexdigest()[:32]
 
 
@@ -167,7 +169,7 @@ def _build_layered_image_sync(
                     # via `docker image prune --filter until=`.
                 },
             )
-        except APIError as exc:
+        except (APIError, BuildError) as exc:
             raise TrialCacheError(
                 f"failed to build layered image {tag!r}: {exc}",
             ) from exc
@@ -290,7 +292,7 @@ async def resolve_trial_image(
         await sleep(random.uniform(2.0, 5.0))
 
         # Most-common exit paths first.
-        if _image_exists_locally(client, local_tag):
+        if await asyncio.to_thread(_image_exists_locally, client, local_tag):
             return local_tag
         if registry_tag and await _try_registry_pull(
             client, registry_tag, local_tag, settings,

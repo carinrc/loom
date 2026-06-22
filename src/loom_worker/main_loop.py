@@ -61,7 +61,11 @@ from loom_worker.sandbox_singleton import (
 )
 from loom_worker.signal_handler import ShutdownState, install_signal_handlers
 from loom_worker.task_image import TaskImageBuildError, resolve_task_image
-from loom_worker.trial_cache import TrialCacheError, resolve_trial_image
+from loom_worker.trial_cache import (
+    TrialCacheError,
+    evict_stale_cache,
+    resolve_trial_image,
+)
 from loom_worker.trial_runner import AgentFactory, LocalTrialRunner
 from loom_worker.vllm_registry import WorkerVLLMRegistry
 
@@ -142,6 +146,7 @@ async def run_worker(settings: WorkerSettings) -> None:
         logger.info("worker_registered worker_id=%s", worker_id)
 
         _run_orphan_cleanup(settings, worker_id)
+        _run_trial_cache_eviction(settings)
 
         sync_http = httpx.Client(
             base_url=str(settings.control_plane_url),
@@ -270,6 +275,20 @@ def _run_orphan_cleanup(settings: WorkerSettings, worker_id: UUID) -> None:
         owned_worker_id=worker_id,
         state_and_owner_lookup=_lookup,
     )
+
+
+def _run_trial_cache_eviction(settings: WorkerSettings) -> None:
+    """Best-effort prune of stale layered images at worker startup.
+
+    TTL (trial_cache_ttl_hours) + free-space backstop
+    (trial_cache_min_free_gb). Docker errors are logged and swallowed —
+    eviction is opportunistic and must not fail worker boot."""
+    import docker as _docker
+    try:
+        client = _docker.from_env()
+        evict_stale_cache(client, settings)
+    except Exception:
+        logger.exception("trial_cache eviction failed at startup")
 
 
 async def _ensure_runtime_buckets(object_store: ObjectStore) -> None:

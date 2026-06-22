@@ -1,7 +1,7 @@
 """active_trial_cache_builds: coordinate per-(image, agent) builds (#317)
 
-Revision ID: 0032
-Revises: 0031
+Revision ID: 0033
+Revises: 0032
 Create Date: 2026-06-22
 
 Tracks which worker is currently building a (task_image_digest,
@@ -29,8 +29,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0032"
-down_revision = "0031"
+revision = "0033"
+down_revision = "0032"
 branch_labels = None
 depends_on = None
 

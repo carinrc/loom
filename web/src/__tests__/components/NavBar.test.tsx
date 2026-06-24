@@ -23,6 +23,7 @@ function renderNav(
 describe("NavBar", () => {
   it("renders the team nav items", () => {
     renderNav(false);
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "New batch" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Monitor" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();

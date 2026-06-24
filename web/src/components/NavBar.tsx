@@ -13,6 +13,7 @@ import { NavLink } from "react-router-dom";
 import { cn } from "../lib/cn";
 
 const NAV_ITEMS = [
+  { to: "/", label: "Home" },
   { to: "/batches/new", label: "New batch" },
   { to: "/monitor", label: "Monitor" },
   { to: "/library", label: "Run Library" },

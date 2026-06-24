@@ -399,8 +399,13 @@ running image.
 ## SPA
 
 `web/` — React 18 + Vite + TypeScript + TanStack Query + React Router.
-11 pages:
+Core pages include:
 
+- **Home** — authenticated `/` overview backed by
+  `GET /api/v1/overview`. The service aggregates current-team readiness,
+  provider health, benchmark readiness, active workers, recent batch/trial
+  activity, and next actions so the SPA does not fan out across multiple
+  resources on first load.
 - **TrialsList** — keyset cursor pagination, state filter
 - **TrialDetail** — header + artifact download links + paginated
   trajectory viewer + EventTimeline (one row per event,

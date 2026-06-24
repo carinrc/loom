@@ -480,6 +480,10 @@ Settings is the session and team-settings surface:
 - the authenticated app shell shows the current team name and role in the
   global navigation so users can identify the team context before submitting
   work, managing providers, creating invites, or minting API tokens;
+- Home is the authenticated default route and reads `GET /api/v1/overview`,
+  a service-side summary of the current team's readiness, provider health,
+  benchmark readiness, worker capacity, recent activity, and role-appropriate
+  next actions;
 - team switching clears cached queries because the current-team context changes
   authorization and result scope;
 - owner users can navigate to Team access for invites and scoped CLI/API token

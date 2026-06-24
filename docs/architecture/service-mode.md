@@ -428,7 +428,9 @@ running image.
 - **Admin access** — owner/team-admin invite create/list/revoke/resend and
   one-time API-token reveal with CLI setup commands; platform-admin users also
   manage fixed internal teams, approve pending access requests into a selected
-  team/role, and review admin audit events
+  team/role, and review admin audit events. The page is split into role-aware
+  sections, and platform-admin invite creation uses a team selector rather than
+  requiring raw team ids.
 - **NotFound**
 
 Auth model: browser users sign in through `/api/v1/auth/*`. The service sets an

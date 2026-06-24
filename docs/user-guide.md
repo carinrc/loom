@@ -115,11 +115,21 @@ members, and team API tokens. Roles are enforced by the API:
 - `owner` can manage team API tokens and provider connections.
 - `platform_admin` is an operator role with cross-team inspection/admin access.
 
-Team Settings shows the signed-in user, current team, role, team switcher,
-joined browser users, and role-aware setup links. Team owners get Team access
-for invites and API tokens; platform admins also manage fixed internal teams
-and approve pending access requests into a selected team and role. Members and
-viewers see only the actions their role allows.
+The app shell always shows the current team and role beside the primary
+navigation, so users can confirm which team will own new batches, provider
+connections, invites, and API-token actions before they act. Team Settings shows
+the signed-in user, current team, role, team switcher, joined browser users,
+and role-aware setup links. Team owners get Team access for invites and API
+tokens; platform admins also manage fixed internal teams and approve pending
+access requests into a selected team and role. Members and viewers see only the
+actions their role allows.
+
+Team access is split into task-focused sections. Platform admins start on
+pending requests, can switch to fixed-team maintenance, create/list invites,
+manage API tokens, or inspect the audit log. Team owners see only invite and
+API-token sections. Invite creation uses the visible team selector instead of a
+raw team id field; the raw invite link is still revealed only once and must be
+shared manually.
 
 Most web workflows now include contextual quickstarts directly on the page. Use
 the copyable snippets in Settings, Team access, Providers, New Batch, Monitor,

@@ -301,7 +301,10 @@ The SPA reduces the old mixed navigation into four primary entries:
 - **Admin access** — team-owner invite create/list/revoke/resend, scoped
   CLI/API token lifecycle with one-time token reveal and setup commands, plus
   platform-admin-only fixed-team management, access-request approval into a
-  selected team/role, one-time invite-link reveal, and audit events.
+  selected team/role, one-time invite-link reveal, and audit events. The route
+  is split into role-aware sections so Requests, Teams, Invites, API tokens, and
+  Audit are not presented as one long mixed form. Platform-admin invite creation
+  uses a team-name selector instead of a raw team id input.
 
 A Batch detail page lives at `/batches/:id` for drill-down from
 either monitor view. It surfaces the config snapshot + lazy

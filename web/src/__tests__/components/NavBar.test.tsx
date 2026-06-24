@@ -4,10 +4,18 @@ import { describe, expect, it } from "vitest";
 
 import NavBar from "../../components/NavBar";
 
-function renderNav(isAdmin: boolean, currentTeamRole: string | null = null) {
+function renderNav(
+  isAdmin: boolean,
+  currentTeamRole: string | null = null,
+  currentTeamName: string | null = null,
+) {
   return render(
     <MemoryRouter>
-      <NavBar isAdmin={isAdmin} currentTeamRole={currentTeamRole} />
+      <NavBar
+        isAdmin={isAdmin}
+        currentTeamRole={currentTeamRole}
+        currentTeamName={currentTeamName}
+      />
     </MemoryRouter>,
   );
 }
@@ -27,6 +35,14 @@ describe("NavBar", () => {
       "lg:w-56",
       "lg:flex-col",
     );
+  });
+
+  it("shows the current team and role in the global navigation", () => {
+    renderNav(false, "owner", "EAI");
+
+    const teamContext = screen.getByLabelText("Current team");
+    expect(teamContext).toHaveTextContent("EAI");
+    expect(teamContext).toHaveTextContent("owner");
   });
 
   it("hides admin-only links from a team user", () => {

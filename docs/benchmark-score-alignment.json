@@ -181,8 +181,8 @@
       },
       "harbor_support": {
         "status": "not_supported",
-        "parity_target": "HuggingFaceH4/MATH-500 canonical row + boxed-answer equivalence checker (the math-eval `is_equiv` algorithm the upstream MATH paper uses)",
-        "decision": "Harbor (coder-harbor-cloud) ships no MATH-500 verifier. Loom's adapter (`MATH500Adapter`, inherits from `HendrycksMATHAdapter`) emits a script verifier that extracts the boxed final answer from `final_answer.txt` and compares it to the canonical row's `answer` field via the boxed-answer equivalence routine the MATH paper and HuggingFaceH4/MATH-500 use. Replay-validated by the shared hendrycks-math verifier test (same code path) + math500-specific listing/convert tests."
+        "parity_target": "The canonical upstream MATH-500 scorer (HuggingFaceH4/MATH-500 boxed-answer equivalence, inherited from the original Hendrycks MATH evaluator) is the parity target. Real Harbor (harbor-framework/harbor at 2ead3f1f, see docs/research/harbor-adapter-snapshot-2026-06-25.md) ships no MATH-500 adapter; the closest math adapters in Harbor (`aime`, `ineqmath`, `omnimath`) cover different task sets and are NOT parity targets for MATH-500.",
+        "decision": "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no MATH-500 adapter (see docs/research/harbor-adapter-snapshot-2026-06-25.md). Loom's `MATH500Adapter` inherits from `HendrycksMATHAdapter` and uses the boxed-answer equivalence routine the MATH paper and HuggingFaceH4/MATH-500 use, so Loom's verifier IS the canonical MATH-500 scorer by construction. Equivalence is proven by replay, not paired-runtime comparison."
       },
       "score_semantics": {
         "task_set": "HuggingFaceH4/MATH-500 test rows imported into math-500.",
@@ -206,7 +206,7 @@
       },
       "layer2_evidence": {
         "status": "replay_validated",
-        "parity_kind": "replay",
+        "parity_kind": "upstream_canonical_by_construction",
         "replay_tests": [
           {
             "case_id": "math-500-pinned-test-split",
@@ -242,8 +242,8 @@
       },
       "harbor_support": {
         "status": "not_supported",
-        "parity_target": "OpenAI HumanEval `check(candidate)` execution bundled with the task",
-        "decision": "Harbor ships no HumanEval verifier. Loom's adapter (`HumanEvalAdapter.convert_instance`) emits the upstream check function verbatim into pytest-style test files, so Loom's pytest verifier IS the canonical scorer by construction."
+        "parity_target": "The canonical upstream OpenAI HumanEval scorer is the parity target: each task's `check(candidate)` function executed against the model's completion. Real Harbor (harbor-framework/harbor at 2ead3f1f, see docs/research/harbor-adapter-snapshot-2026-06-25.md) ships `adapters/humanevalfix` (the HumanEval+ bugfix variant) but no plain HumanEval adapter; humanevalfix scores bug-fix correctness on a different task set with different prompts and is NOT a valid parity target for plain HumanEval.",
+        "decision": "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no plain HumanEval adapter (see docs/research/harbor-adapter-snapshot-2026-06-25.md); the humanevalfix adapter targets a different task set. Loom's `HumanEvalAdapter` emits the upstream OpenAI `check(candidate)` function verbatim into the pytest harness, so Loom's verifier IS the canonical OpenAI HumanEval scorer by construction. Equivalence is proven by replay, not paired-runtime comparison."
       },
       "score_semantics": {
         "task_set": "openai/openai_humaneval test tasks imported into humaneval.",
@@ -267,7 +267,7 @@
       },
       "layer2_evidence": {
         "status": "replay_validated",
-        "parity_kind": "construction",
+        "parity_kind": "upstream_canonical_by_construction",
         "replay_tests": [
           {
             "case_id": "humaneval-canonical-tests-pass",
@@ -351,8 +351,8 @@
       },
       "harbor_support": {
         "status": "not_supported",
-        "parity_target": "MBPP canonical tests bundled with the task",
-        "decision": "Harbor (coder-harbor-cloud) ships only voyager bespoke tasks (fizzbuzz, hello-world, bugfix-sum). It does not ship an MBPP verifier. Loom's verifier IS the canonical MBPP pytest harness — the same upstream test strings are written verbatim into the materialized bundle by `MBPPAdapter.convert_instance`, so the verifier and the canonical scorer are the same code path by construction. Equivalence is proven by replay, not paired-runtime comparison."
+        "parity_target": "The canonical upstream sanitized-MBPP test-string scorer is the parity target: each task's bundled assertion statements executed against the model's solution under pytest. Real Harbor (harbor-framework/harbor at 2ead3f1f, see docs/research/harbor-adapter-snapshot-2026-06-25.md) ships no MBPP adapter.",
+        "decision": "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no MBPP adapter (see docs/research/harbor-adapter-snapshot-2026-06-25.md). Loom's `MBPPAdapter` writes the upstream sanitized-MBPP test strings verbatim into the bundled pytest files, so Loom's verifier IS the canonical MBPP scorer by construction. Equivalence is proven by replay, not paired-runtime comparison."
       },
       "score_semantics": {
         "task_set": "sanitized MBPP test rows imported into mbpp.",
@@ -376,7 +376,7 @@
       },
       "layer2_evidence": {
         "status": "replay_validated",
-        "parity_kind": "construction",
+        "parity_kind": "upstream_canonical_by_construction",
         "replay_tests": [
           {
             "case_id": "mbpp-canonical-tests-pass",
@@ -402,8 +402,8 @@
       },
       "harbor_support": {
         "status": "not_supported",
-        "parity_target": "exact letter match against the MMLU-Pro dataset row's answer field",
-        "decision": "Harbor ships no MMLU-Pro verifier. Loom's adapter (`MMLUProAdapter.convert_instance`) emits a script verifier that extracts the last standalone letter from `final_answer.txt` and compares to the canonical answer letter on the dataset row. Equivalence is proven by replay."
+        "parity_target": "The canonical upstream MMLU-Pro scorer (exact-letter match against the dataset row's canonical answer) is the parity target. Real Harbor (harbor-framework/harbor at 2ead3f1f, see docs/research/harbor-adapter-snapshot-2026-06-25.md) ships `adapters/mmmlu` (the M-MMLU multilingual variant) but no MMLU-Pro adapter; mmmlu covers a different question pool with multilingual prompts and is NOT a valid parity target for MMLU-Pro.",
+        "decision": "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no MMLU-Pro adapter (see docs/research/harbor-adapter-snapshot-2026-06-25.md); the mmmlu adapter targets a different (multilingual) question pool. Loom's `MMLUProAdapter` implements exact-letter match against the MMLU-Pro dataset row's canonical answer, so Loom's verifier IS the canonical MMLU-Pro scorer by construction. Equivalence is proven by replay, not paired-runtime comparison."
       },
       "score_semantics": {
         "task_set": "TIGER-Lab/MMLU-Pro test rows imported into mmlu-pro.",
@@ -427,7 +427,7 @@
       },
       "layer2_evidence": {
         "status": "replay_validated",
-        "parity_kind": "replay",
+        "parity_kind": "upstream_canonical_by_construction",
         "replay_tests": [
           {
             "case_id": "mmlu-pro-correct-letter-scores-1",
@@ -448,8 +448,8 @@
       },
       "harbor_support": {
         "status": "not_supported",
-        "parity_target": "upstream SkillFlow bundle's bundled pytest suite — the verifier semantics ARE the canonical scorer",
-        "decision": "Harbor ships no SkillFlow verifier. Loom's SkillFlow adapter passes through the upstream task bundle's structure unchanged: the bundled pre-baked solution + tests pass under pytest end-to-end. The Loom pytest verifier is the canonical scorer by construction."
+        "parity_target": "The canonical upstream SkillFlow task-bundle scorer (pre-baked solution + pytest tests bundled with each task) is the parity target. Real Harbor (harbor-framework/harbor at 2ead3f1f, see docs/research/harbor-adapter-snapshot-2026-06-25.md) ships no SkillFlow adapter — SkillFlow is a Loom-supported external benchmark not in Harbor's catalog.",
+        "decision": "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no SkillFlow adapter (see docs/research/harbor-adapter-snapshot-2026-06-25.md); SkillFlow is not in Harbor's catalog. Loom's SkillFlow adapter passes through the upstream task bundle's pre-baked solution + tests, so pytest IS the canonical SkillFlow scorer by construction. Equivalence is proven by replay, not paired-runtime comparison."
       },
       "score_semantics": {
         "task_set": "SkillFlow tasks imported from the upstream task bundle.",
@@ -473,7 +473,7 @@
       },
       "layer2_evidence": {
         "status": "replay_validated",
-        "parity_kind": "construction",
+        "parity_kind": "upstream_canonical_by_construction",
         "replay_tests": [
           {
             "case_id": "skillflow-solution-runs",
@@ -494,8 +494,8 @@
       },
       "harbor_support": {
         "status": "not_supported",
-        "parity_target": "upstream SkillLearnBench bundle's bundled pytest suite — the verifier semantics ARE the canonical scorer",
-        "decision": "Same construction as skillflow — the SkillLearnBench adapter passes through the upstream task bundle's structure unchanged and pytest is the canonical evaluator."
+        "parity_target": "The canonical upstream SkillLearnBench task-bundle scorer is the parity target. Real Harbor (harbor-framework/harbor at 2ead3f1f, see docs/research/harbor-adapter-snapshot-2026-06-25.md) ships no SkillLearnBench adapter — SkillLearnBench is a Loom-supported external benchmark not in Harbor's catalog.",
+        "decision": "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no SkillLearnBench adapter (see docs/research/harbor-adapter-snapshot-2026-06-25.md); SkillLearnBench is not in Harbor's catalog. Loom's SkillLearnBench adapter passes through the upstream task bundle's structure unchanged, so pytest IS the canonical SkillLearnBench evaluator by construction. Equivalence is proven by replay, not paired-runtime comparison."
       },
       "score_semantics": {
         "task_set": "SkillLearnBench tasks imported from the upstream repository.",
@@ -519,7 +519,7 @@
       },
       "layer2_evidence": {
         "status": "replay_validated",
-        "parity_kind": "construction",
+        "parity_kind": "upstream_canonical_by_construction",
         "replay_tests": [
           {
             "case_id": "skilllearnbench-solution-runs",
@@ -605,8 +605,8 @@
       },
       "harbor_support": {
         "status": "not_supported",
-        "parity_target": "upstream Terminal-Bench-2 bundled `tests/` directory — the verifier shim wraps the upstream test suite verbatim",
-        "decision": "Harbor (coder-harbor-cloud) ships no Terminal-Bench-2 verifier. Loom's adapter (in `packages/loom-benchmark-terminal-bench-2/`) emits a verifier shim (`verifier/run.sh`) that wraps the upstream TB2 `tests/` directory and emits a VerifierResult JSON matching Loom's contract. The shim's TEST_DIR defaults to `/app/environment/tb2-tests` where the upstream tests live in the per-task image. Loom's verifier code path IS the upstream TB2 test runner, so parity is by construction. Oracle smoke EXECUTES end-to-end in CI (not just structurally asserted) via the yaml-solution replay test, which is stronger evidence than the other by-construction benchmarks."
+        "parity_target": "The canonical upstream Terminal-Bench 2 (laude-institute) test runner is the parity target. Real Harbor (harbor-framework/harbor) IS descended from terminal-bench, but at commit 2ead3f1f the `adapters/` directory ships no terminal-bench-2 adapter (see docs/research/harbor-adapter-snapshot-2026-06-25.md) — TB-2 is Harbor's host benchmark framework itself, not an adapted external benchmark.",
+        "decision": "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no terminal-bench-2 adapter (see docs/research/harbor-adapter-snapshot-2026-06-25.md) because TB-2 is the host framework Harbor is built on, not an external benchmark Harbor adapts. Loom's TB-2 adapter wraps the upstream TB-2 test runner verbatim, so Loom's verifier IS the canonical TB-2 scorer by construction. Equivalence is proven by replay, not paired-runtime comparison."
       },
       "score_semantics": {
         "task_set": "Terminal-Bench 2.0 tasks from the pinned sibling adapter package.",
@@ -630,7 +630,7 @@
       },
       "layer2_evidence": {
         "status": "replay_validated",
-        "parity_kind": "construction",
+        "parity_kind": "upstream_canonical_by_construction",
         "replay_tests": [
           {
             "case_id": "tb2-oracle-solution-staged",

@@ -5,12 +5,22 @@ manifest against `coder-harbor-cloud` (a Huawei agent platform mistakenly
 identified as "Harbor"). The real Harbor is `harbor-framework/harbor`,
 pinned in `harbor_reference` at commit `2ead3f1f` (Task A2).
 
-This script rewrites `harbor_support` for the 5 v1.0 benchmarks where
-the real Harbor ships an adapter (Task A3). A follow-up batch (Task A4)
-will extend this script with an UNSUPPORTED dict for the remaining 7
-benchmarks. The script is one-shot and will be DELETED in Task A8.
+This script rewrites `harbor_support` for:
+- The 5 v1.0 benchmarks where the real Harbor ships an adapter (Task A3,
+  `SUPPORTED` dict).
+- The 7 v1.0 benchmarks where the real Harbor does NOT ship an adapter
+  (Task A4, `UNSUPPORTED` dict). For these, `harbor_support.status`
+  stays `not_supported` but `parity_target` + `decision` are rewritten
+  against `harbor-framework/harbor@2ead3f1f` (with the
+  `docs/research/harbor-adapter-snapshot-2026-06-25.md` snapshot cited)
+  and `layer2_evidence.parity_kind` is set to
+  `upstream_canonical_by_construction`. `layer2_evidence.status` stays
+  `replay_validated` because the upstream-canonical-by-construction
+  equivalence still holds.
 
-Mutation summary per entry:
+The script is one-shot and will be DELETED in Task A8.
+
+Mutation summary per entry (SUPPORTED batch):
 - `harbor_support` is fully replaced with a `supported`-status block
   pointing at the real Harbor adapter directory at the pinned commit
   plus a summary of the published `parity_experiment.json` baseline
@@ -172,12 +182,172 @@ _PENDING_REASON = (
 )
 
 
+_SNAPSHOT_DOC = "docs/research/harbor-adapter-snapshot-2026-06-25.md"
+
+
+UNSUPPORTED: dict[str, dict[str, str]] = {
+    "humaneval": {
+        "status": "not_supported",
+        "parity_target": (
+            "The canonical upstream OpenAI HumanEval scorer is the parity "
+            "target: each task's `check(candidate)` function executed "
+            "against the model's completion. Real Harbor "
+            "(harbor-framework/harbor at 2ead3f1f, see "
+            f"{_SNAPSHOT_DOC}) ships `adapters/humanevalfix` (the "
+            "HumanEval+ bugfix variant) but no plain HumanEval adapter; "
+            "humanevalfix scores bug-fix correctness on a different task "
+            "set with different prompts and is NOT a valid parity target "
+            "for plain HumanEval."
+        ),
+        "decision": (
+            "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no "
+            f"plain HumanEval adapter (see {_SNAPSHOT_DOC}); the "
+            "humanevalfix adapter targets a different task set. Loom's "
+            "`HumanEvalAdapter` emits the upstream OpenAI `check(candidate)` "
+            "function verbatim into the pytest harness, so Loom's verifier "
+            "IS the canonical OpenAI HumanEval scorer by construction. "
+            "Equivalence is proven by replay, not paired-runtime comparison."
+        ),
+    },
+    "mbpp": {
+        "status": "not_supported",
+        "parity_target": (
+            "The canonical upstream sanitized-MBPP test-string scorer is "
+            "the parity target: each task's bundled assertion statements "
+            "executed against the model's solution under pytest. Real "
+            "Harbor (harbor-framework/harbor at 2ead3f1f, see "
+            f"{_SNAPSHOT_DOC}) ships no MBPP adapter."
+        ),
+        "decision": (
+            "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no "
+            f"MBPP adapter (see {_SNAPSHOT_DOC}). Loom's `MBPPAdapter` "
+            "writes the upstream sanitized-MBPP test strings verbatim "
+            "into the bundled pytest files, so Loom's verifier IS the "
+            "canonical MBPP scorer by construction. Equivalence is "
+            "proven by replay, not paired-runtime comparison."
+        ),
+    },
+    "math-500": {
+        "status": "not_supported",
+        "parity_target": (
+            "The canonical upstream MATH-500 scorer (HuggingFaceH4/MATH-500 "
+            "boxed-answer equivalence, inherited from the original "
+            "Hendrycks MATH evaluator) is the parity target. Real Harbor "
+            "(harbor-framework/harbor at 2ead3f1f, see "
+            f"{_SNAPSHOT_DOC}) ships no MATH-500 adapter; the closest "
+            "math adapters in Harbor (`aime`, `ineqmath`, `omnimath`) "
+            "cover different task sets and are NOT parity targets for "
+            "MATH-500."
+        ),
+        "decision": (
+            "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no "
+            f"MATH-500 adapter (see {_SNAPSHOT_DOC}). Loom's "
+            "`MATH500Adapter` inherits from `HendrycksMATHAdapter` and "
+            "uses the boxed-answer equivalence routine the MATH paper and "
+            "HuggingFaceH4/MATH-500 use, so Loom's verifier IS the "
+            "canonical MATH-500 scorer by construction. Equivalence is "
+            "proven by replay, not paired-runtime comparison."
+        ),
+    },
+    "mmlu-pro": {
+        "status": "not_supported",
+        "parity_target": (
+            "The canonical upstream MMLU-Pro scorer (exact-letter match "
+            "against the dataset row's canonical answer) is the parity "
+            "target. Real Harbor (harbor-framework/harbor at 2ead3f1f, "
+            f"see {_SNAPSHOT_DOC}) ships `adapters/mmmlu` (the M-MMLU "
+            "multilingual variant) but no MMLU-Pro adapter; mmmlu covers "
+            "a different question pool with multilingual prompts and is "
+            "NOT a valid parity target for MMLU-Pro."
+        ),
+        "decision": (
+            "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no "
+            f"MMLU-Pro adapter (see {_SNAPSHOT_DOC}); the mmmlu adapter "
+            "targets a different (multilingual) question pool. Loom's "
+            "`MMLUProAdapter` implements exact-letter match against the "
+            "MMLU-Pro dataset row's canonical answer, so Loom's verifier "
+            "IS the canonical MMLU-Pro scorer by construction. "
+            "Equivalence is proven by replay, not paired-runtime "
+            "comparison."
+        ),
+    },
+    "terminal-bench-2": {
+        "status": "not_supported",
+        "parity_target": (
+            "The canonical upstream Terminal-Bench 2 (laude-institute) "
+            "test runner is the parity target. Real Harbor "
+            "(harbor-framework/harbor) IS descended from terminal-bench, "
+            "but at commit 2ead3f1f the `adapters/` directory ships no "
+            f"terminal-bench-2 adapter (see {_SNAPSHOT_DOC}) — TB-2 is "
+            "Harbor's host benchmark framework itself, not an adapted "
+            "external benchmark."
+        ),
+        "decision": (
+            "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no "
+            f"terminal-bench-2 adapter (see {_SNAPSHOT_DOC}) because TB-2 "
+            "is the host framework Harbor is built on, not an external "
+            "benchmark Harbor adapts. Loom's TB-2 adapter wraps the "
+            "upstream TB-2 test runner verbatim, so Loom's verifier IS "
+            "the canonical TB-2 scorer by construction. Equivalence is "
+            "proven by replay, not paired-runtime comparison."
+        ),
+    },
+    "skillflow": {
+        "status": "not_supported",
+        "parity_target": (
+            "The canonical upstream SkillFlow task-bundle scorer "
+            "(pre-baked solution + pytest tests bundled with each task) "
+            "is the parity target. Real Harbor (harbor-framework/harbor "
+            f"at 2ead3f1f, see {_SNAPSHOT_DOC}) ships no SkillFlow "
+            "adapter — SkillFlow is a Loom-supported external benchmark "
+            "not in Harbor's catalog."
+        ),
+        "decision": (
+            "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no "
+            f"SkillFlow adapter (see {_SNAPSHOT_DOC}); SkillFlow is not "
+            "in Harbor's catalog. Loom's SkillFlow adapter passes "
+            "through the upstream task bundle's pre-baked solution + "
+            "tests, so pytest IS the canonical SkillFlow scorer by "
+            "construction. Equivalence is proven by replay, not "
+            "paired-runtime comparison."
+        ),
+    },
+    "skilllearnbench": {
+        "status": "not_supported",
+        "parity_target": (
+            "The canonical upstream SkillLearnBench task-bundle scorer is "
+            "the parity target. Real Harbor (harbor-framework/harbor at "
+            f"2ead3f1f, see {_SNAPSHOT_DOC}) ships no SkillLearnBench "
+            "adapter — SkillLearnBench is a Loom-supported external "
+            "benchmark not in Harbor's catalog."
+        ),
+        "decision": (
+            "Real Harbor (harbor-framework/harbor at 2ead3f1f) ships no "
+            f"SkillLearnBench adapter (see {_SNAPSHOT_DOC}); "
+            "SkillLearnBench is not in Harbor's catalog. Loom's "
+            "SkillLearnBench adapter passes through the upstream task "
+            "bundle's structure unchanged, so pytest IS the canonical "
+            "SkillLearnBench evaluator by construction. Equivalence is "
+            "proven by replay, not paired-runtime comparison."
+        ),
+    },
+}
+
+
 def _apply_supported(entry: dict, harbor_support: dict[str, object]) -> None:
     entry["harbor_support"] = harbor_support
     layer2 = entry.setdefault("layer2_evidence", {})
     layer2["status"] = "pending_paired_run"
     layer2["parity_kind"] = "matched_config_paired_run_pending"
     layer2["pending_reason"] = _PENDING_REASON
+
+
+def _apply_unsupported(entry: dict, harbor_support: dict[str, str]) -> None:
+    entry["harbor_support"] = harbor_support
+    layer2 = entry.setdefault("layer2_evidence", {})
+    # status stays "replay_validated" — upstream-canonical-by-construction
+    # equivalence still holds. parity_kind is made explicit.
+    layer2["parity_kind"] = "upstream_canonical_by_construction"
 
 
 def main() -> int:
@@ -189,6 +359,12 @@ def main() -> int:
         if bid not in by_id:
             raise SystemExit(f"benchmark {bid!r} missing from manifest")
         _apply_supported(by_id[bid], harbor_support)
+        updated.append(bid)
+
+    for bid, harbor_support in UNSUPPORTED.items():
+        if bid not in by_id:
+            raise SystemExit(f"benchmark {bid!r} missing from manifest")
+        _apply_unsupported(by_id[bid], harbor_support)
         updated.append(bid)
 
     MANIFEST.write_text(

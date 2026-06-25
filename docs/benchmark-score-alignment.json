@@ -66,7 +66,8 @@
             "asserts": "the extraction rule is 'last integer on the final line', documented behavior matches the AIME single-integer answer convention"
           }
         ],
-        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7."
+        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7.",
+        "stage_b_issue": "https://github.com/carinrc/loom/issues/540"
       }
     },
     {
@@ -119,7 +120,8 @@
             "asserts": "the shared integer-extraction routine handles the canonical AIME answer shape — used by both aime-24 and aime-25 since they share verifier infrastructure"
           }
         ],
-        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7."
+        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7.",
+        "stage_b_issue": "https://github.com/carinrc/loom/issues/540"
       }
     },
     {
@@ -167,7 +169,8 @@
             "asserts": "reward={'score': 1.0} when `final_answer.txt` ends with the canonical letter from `answer_key.json`"
           }
         ],
-        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7."
+        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7.",
+        "stage_b_issue": "https://github.com/carinrc/loom/issues/541"
       }
     },
     {
@@ -337,7 +340,8 @@
             "asserts": "functional-format cases invoke the solution method correctly, matching the upstream evaluator's invocation"
           }
         ],
-        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7."
+        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7.",
+        "stage_b_issue": "https://github.com/carinrc/loom/issues/542"
       }
     },
     {
@@ -591,7 +595,8 @@
             "mitigation": "Operator smoke: submit an oracle batch with N=5 SWE-Bench Verified instances and verify all 5 reach state=succeeded with the bundled patch. Any verifier-semantics regression would surface as reward!=1.0 on the oracle path."
           }
         ],
-        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7."
+        "pending_reason": "Original Layer 2 evidence (PRs #499 #513 #514 #517) claimed parity-by-construction against coder-harbor-cloud (Huawei platform, wrong Harbor). Real Harbor (harbor-framework/harbor at 2ead3f1f) ships an adapter for this benchmark; matched-config paired runs required to validate score parity. Stage B child issue link added in Task A7.",
+        "stage_b_issue": "https://github.com/carinrc/loom/issues/543"
       }
     },
     {

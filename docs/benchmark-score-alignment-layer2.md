@@ -73,7 +73,7 @@ implementation.
   - `packages/loom-benchmarks/tests/test_aime_adapter.py::test_aime_run_sh_is_self_contained_and_writes_verifier_result`
   - `packages/loom-benchmarks/tests/test_aime_adapter.py::test_aime_checker_rejects_wrong_answer`
   - `packages/loom-benchmarks/tests/test_aime_adapter.py::test_aime_checker_picks_last_integer`
-- **Stage B paired run:** tracked in a child issue (link added by Task A7).
+- **Stage B paired run:** tracked in [#540](https://github.com/carinrc/loom/issues/540).
 
 ### aime-25
 
@@ -84,7 +84,7 @@ implementation.
 - **Replay tests (verifier semantics):**
   - `packages/loom-benchmarks/tests/test_aime_adapter.py::test_aime_2025_emits_script_path`
   - `packages/loom-benchmarks/tests/test_aime_adapter.py::test_aime_checker_extracts_last_integer`
-- **Stage B paired run:** tracked in a child issue (link added by Task A7).
+- **Stage B paired run:** tracked in [#540](https://github.com/carinrc/loom/issues/540).
 
 ### gpqa
 
@@ -95,7 +95,7 @@ implementation.
 - **Layer 2 status:** `pending_paired_run`.
 - **Replay tests (verifier semantics):**
   - `packages/loom-benchmarks/tests/test_gpqa_adapter.py::test_gpqa_verifier_scores_correct_letter`
-- **Stage B paired run:** tracked in a child issue (link added by Task A7).
+- **Stage B paired run:** tracked in [#541](https://github.com/carinrc/loom/issues/541).
 
 ### livecodebench
 
@@ -109,7 +109,7 @@ implementation.
   - `packages/loom-benchmarks/tests/test_livecodebench_adapter.py::test_livecodebench_solution_passes_subprocess_run`
   - `packages/loom-benchmarks/tests/test_livecodebench_adapter.py::test_livecodebench_decodes_compressed_private_cases`
   - `packages/loom-benchmarks/tests/test_livecodebench_adapter.py::test_livecodebench_functional_cases_call_solution_method`
-- **Stage B paired run:** tracked in a child issue (link added by Task A7).
+- **Stage B paired run:** tracked in [#542](https://github.com/carinrc/loom/issues/542).
 
 ### swe-bench-verified
 
@@ -124,7 +124,7 @@ implementation.
   - `packages/loom-benchmarks/tests/test_swe_bench_verified_adapter.py::test_empty_test_node_lists_emit_script_verifier_reward_zero` (guards the #388 false-positive: empty node-id lists must NOT silently pass)
   - `packages/loom-benchmarks/tests/test_swe_bench_verified_adapter.py::test_image_slug_replaces_double_underscore` (per-instance image-name encoding pins the runtime to the upstream eval image)
 - **Known limitation:** no CI test pulls the multi-GB `swebench/sweb.eval.x86_64.<slug>` image to execute `solve.sh` + pytest end-to-end. Image size × image count (500) makes per-instance CI execution impractical. Mitigation: operator smoke — submit an oracle batch with N=5 SWE-Bench Verified instances and verify all 5 reach `state=succeeded` with the bundled patch.
-- **Stage B paired run:** tracked in a child issue (link added by Task A7).
+- **Stage B paired run:** tracked in [#543](https://github.com/carinrc/loom/issues/543).
 
 ## Benchmarks without a Harbor adapter (upstream-canonical equivalence)
 

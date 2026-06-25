@@ -93,3 +93,52 @@ def test_layer1_manifest_gate_rejects_coder_harbor_cloud_in_parity_target(
 
     assert any(r.status == "fail" for r in results)
     assert any("coder-harbor-cloud" in r.detail for r in results if r.status == "fail")
+
+
+def test_manifest_declares_harbor_framework_reference() -> None:
+    gate = _load_module()
+    manifest = gate.load_manifest(MANIFEST)
+    ref = manifest.get("harbor_reference")
+    assert ref is not None, "manifest must declare harbor_reference at top level"
+    assert ref.get("repo") == "harbor-framework/harbor"
+    assert ref.get("url") == "https://github.com/harbor-framework/harbor"
+    pinned = ref.get("pinned_commit")
+    assert (
+        isinstance(pinned, str)
+        and len(pinned) == 40
+        and all(c in "0123456789abcdef" for c in pinned)
+    ), "harbor_reference.pinned_commit must be a 40-char hex sha"
+
+
+def test_manifest_gate_rejects_missing_harbor_reference(tmp_path: Path) -> None:
+    gate = _load_module()
+    manifest = gate.load_manifest(MANIFEST)
+    poisoned = copy.deepcopy(manifest)
+    poisoned.pop("harbor_reference", None)
+    bad = tmp_path / "alignment.json"
+    bad.write_text(json.dumps(poisoned), encoding="utf-8")
+    loaded = gate.load_manifest(bad)
+    results = gate.check_manifest(loaded)
+    assert any(
+        r.status == "fail" and "harbor_reference" in r.detail for r in results
+    ), (
+        "expected a fail mentioning harbor_reference, got: "
+        f"{[(r.status, r.detail) for r in results]}"
+    )
+
+
+def test_manifest_gate_rejects_wrong_harbor_repo(tmp_path: Path) -> None:
+    gate = _load_module()
+    manifest = gate.load_manifest(MANIFEST)
+    poisoned = copy.deepcopy(manifest)
+    poisoned["harbor_reference"]["repo"] = "coder-harbor-cloud"
+    bad = tmp_path / "alignment.json"
+    bad.write_text(json.dumps(poisoned), encoding="utf-8")
+    loaded = gate.load_manifest(bad)
+    results = gate.check_manifest(loaded)
+    assert any(
+        r.status == "fail" and "harbor-framework/harbor" in r.detail for r in results
+    ), (
+        "expected a fail naming the correct repo, got: "
+        f"{[(r.status, r.detail) for r in results]}"
+    )

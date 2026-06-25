@@ -2,6 +2,14 @@
   "schema_version": 1,
   "scope": "v1.0-supported benchmark Layer 1 score credibility",
   "layer_definition": "Model-independent verifier/scoring credibility: given the same final answer, patch, or task artifact, Loom must assign the same task-level reward and aggregate metric semantics as the canonical reference.",
+  "harbor_reference": {
+    "repo": "harbor-framework/harbor",
+    "url": "https://github.com/harbor-framework/harbor",
+    "pinned_commit": "2ead3f1f2462f6f7260aca5ef2377cd7e309ff06",
+    "pinned_date": "2026-06-25",
+    "adapter_snapshot_doc": "docs/research/harbor-adapter-snapshot-2026-06-25.md",
+    "note": "All harbor_support.decision and harbor_support.parity_target fields below reference this repo at this commit. Earlier merged Layer 2 batches (PRs #499 #513 #514 #517) mistakenly referenced coder-harbor-cloud (Huawei platform). See #419 sub-issue #538 for the correction."
+  },
   "benchmarks": [
     {
       "benchmark_id": "aime-24",

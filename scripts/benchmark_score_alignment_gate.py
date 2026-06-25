@@ -134,6 +134,14 @@ def _row_errors(row: dict[str, Any], index: int) -> list[str]:
         status = harbor.get("status")
         if isinstance(status, str) and status not in HARBOR_STATUSES:
             errors.append(f"{label}: harbor_support.status {status!r} is invalid")
+        for field_name in ("decision", "parity_target"):
+            value = harbor.get(field_name)
+            if isinstance(value, str) and "coder-harbor-cloud" in value:
+                errors.append(
+                    f"{label}: harbor_support.{field_name} references "
+                    f"coder-harbor-cloud (Huawei platform); use "
+                    f"harbor-framework/harbor instead"
+                )
 
     score = row.get("score_semantics")
     if not isinstance(score, dict):

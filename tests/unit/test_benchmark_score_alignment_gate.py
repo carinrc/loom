@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import sys
@@ -58,3 +59,37 @@ def test_layer1_manifest_gate_requires_evidence_case() -> None:
 
     assert [r.status for r in results] == ["fail"]
     assert "missing layer1 evidence case" in results[0].detail
+
+
+def test_layer1_manifest_gate_rejects_coder_harbor_cloud_in_decision(
+    tmp_path: Path,
+) -> None:
+    gate = _load_module()
+    manifest = copy.deepcopy(json.loads(MANIFEST.read_text(encoding="utf-8")))
+    manifest["benchmarks"][0]["harbor_support"]["decision"] = (
+        "Mirror coder-harbor-cloud parity target"
+    )
+    path = tmp_path / "alignment.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    results = gate.check_manifest(gate.load_manifest(path))
+
+    assert any(r.status == "fail" for r in results)
+    assert any("coder-harbor-cloud" in r.detail for r in results if r.status == "fail")
+
+
+def test_layer1_manifest_gate_rejects_coder_harbor_cloud_in_parity_target(
+    tmp_path: Path,
+) -> None:
+    gate = _load_module()
+    manifest = copy.deepcopy(json.loads(MANIFEST.read_text(encoding="utf-8")))
+    manifest["benchmarks"][0]["harbor_support"]["parity_target"] = (
+        "coder-harbor-cloud v1.2"
+    )
+    path = tmp_path / "alignment.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    results = gate.check_manifest(gate.load_manifest(path))
+
+    assert any(r.status == "fail" for r in results)
+    assert any("coder-harbor-cloud" in r.detail for r in results if r.status == "fail")

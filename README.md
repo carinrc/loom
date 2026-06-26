@@ -1,3 +1,19 @@
+> **Repository moved:** active development has moved to
+> [`qianyi-sun/loom`](https://github.com/qianyi-sun/loom). This
+> `carinrc/loom` repository is retained only as a historical archive while the
+> expired `carinrc` Enterprise trial is resolved. Clone, branch, open PRs, and
+> watch required GitHub Actions in the new canonical public repository:
+>
+> ```bash
+> git clone https://github.com/qianyi-sun/loom.git
+> ```
+>
+> Historical issues remain readable here until they are recreated or manually
+> moved. The migration-time open issue index is tracked in
+> [`qianyi-sun/loom#24`](https://github.com/qianyi-sun/loom/issues/24). See
+> [`docs/repo-migration.md`](docs/repo-migration.md) for migrated settings,
+> issue-tracker status, and local remote-update commands.
+
 # Loom
 
 Loom is a team platform for evaluating agents and LLM-powered systems on
@@ -384,6 +400,11 @@ models, lives in [`docs/user-guide.md#local-llms`](docs/user-guide.md#local-llms
   layout, tests, and contribution workflow.
 
 ## Repository Governance
+
+The canonical development repository is
+[`qianyi-sun/loom`](https://github.com/qianyi-sun/loom). The old
+`carinrc/loom` repository should not receive new feature work except migration
+or archival notices.
 
 Loom is licensed under Apache-2.0. Normal development uses PRs into `dev`;
 `main` is reserved for release promotion. The required `repository-checks`

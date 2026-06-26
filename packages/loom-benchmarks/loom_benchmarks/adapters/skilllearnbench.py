@@ -38,6 +38,15 @@ _UPSTREAM_BAD_ORACLE_INSTANCE_IDS = frozenset({
     "earthquake-plate-calculation/earthquake-plate-calculation-3",
     "earthquake-plate-calculation/earthquake-plate-calculation-4",
     "earthquake-plate-calculation/earthquake-plate-calculation-5",
+    # Public-beta replay showed every upstream organize oracle returns reward
+    # 0.0; variants 1 and 6 also raise FileNotFoundError for a paper absent
+    # from their Dockerfile paper list.
+    "organize-messy-files/organize-messy-files-1",
+    "organize-messy-files/organize-messy-files-2",
+    "organize-messy-files/organize-messy-files-3",
+    "organize-messy-files/organize-messy-files-4",
+    "organize-messy-files/organize-messy-files-5",
+    "organize-messy-files/organize-messy-files-6",
 })
 _EXTERNAL_ORACLE_ENV_NAMES = frozenset({"GH_TOKEN", "GITHUB_TOKEN"})
 
@@ -155,15 +164,27 @@ class SkillLearnBenchAdapter(SkillFlowAdapter):
     ) -> bool:
         if not instance.instance_id.startswith("python-scala-translation/"):
             return False
+        changed = False
+        for source, target in (
+            (out_dir / "localtest" / "build.sbt", out_dir / "build.sbt"),
+            (
+                out_dir / "environment" / "scala_tokenizer" / "src"
+                / "test" / "scala" / "tokenizer" / "TokenizerSpec.scala",
+                out_dir / "TokenizerSpec.scala",
+            ),
+        ):
+            if source.exists() and not target.exists():
+                shutil.copy2(source, target)
+                changed = True
         solve_sh = out_dir / "solution" / "solve.sh"
         if not solve_sh.exists():
-            return False
+            return changed
         text = solve_sh.read_text()
         if "Tokenizer.scala" not in text:
-            return False
+            return changed
         marker = "LOOM_PYTHON_SCALA_ROOT_OUTPUT_NORMALIZED"
         if marker in text:
-            return False
+            return changed
         solve_sh.write_text(
             text.rstrip()
             + "\n\n"

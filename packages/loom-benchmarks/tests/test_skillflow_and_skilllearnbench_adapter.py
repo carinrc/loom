@@ -430,6 +430,29 @@ def test_skilllearnbench_marks_known_bad_upstream_oracle_solutions_ineligible(
     }
 
 
+def test_skilllearnbench_marks_organize_oracle_solutions_ineligible(
+    tmp_path: Path,
+) -> None:
+    family = "organize-messy-files"
+    for index in range(1, 7):
+        task = f"{family}-{index}"
+        bundle = _write_real_bundle(tmp_path, family=family, task=task)
+        (bundle / "solution").mkdir()
+        (bundle / "solution" / "solve.sh").write_text(
+            "#!/bin/bash\n"
+            "python3 solution.py\n",
+        )
+
+    instances = list(
+        SkillLearnBenchAdapter().list_instances(source_dir=tmp_path, split="test"),
+    )
+
+    assert {
+        instance.instance_id: instance.tags["oracle_eligible"]
+        for instance in instances
+    } == {f"{family}/{family}-{index}": "false" for index in range(1, 7)}
+
+
 def test_skilllearnbench_marks_external_secret_oracle_tasks_ineligible(
     tmp_path: Path,
 ) -> None:
@@ -462,6 +485,15 @@ def test_skilllearnbench_normalizes_python_scala_oracle_output_to_task_root(
     task = "python-scala-translation-1"
     bundle = _write_real_bundle(tmp_path, family=family, task=task)
     (bundle / "solution").mkdir()
+    (bundle / "localtest").mkdir()
+    (bundle / "localtest" / "build.sbt").write_text(
+        'name := "scala-tokenizer"\n',
+    )
+    spec_dir = bundle / "environment" / "scala_tokenizer" / "src" / "test" / "scala" / "tokenizer"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "TokenizerSpec.scala").write_text(
+        "package tokenizer\nclass TokenizerSpec\n",
+    )
     (bundle / "solution" / "solve.sh").write_text(
         "#!/bin/bash\n"
         "set -euo pipefail\n"
@@ -485,6 +517,10 @@ def test_skilllearnbench_normalizes_python_scala_oracle_output_to_task_root(
         f"stdout={result.stdout}\nstderr={result.stderr}"
     )
     assert (out_dir / "Tokenizer.scala").read_text() == "object Tokenizer\n"
+    assert (out_dir / "build.sbt").read_text() == 'name := "scala-tokenizer"\n'
+    assert (
+        out_dir / "TokenizerSpec.scala"
+    ).read_text() == "package tokenizer\nclass TokenizerSpec\n"
 
 
 def test_skilllearnbench_rewrites_organize_heredoc_run_for_classic_docker_build(

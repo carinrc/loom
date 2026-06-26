@@ -682,6 +682,12 @@ See `docs/architecture/agent-adapter.md` for the architecture.
 
 ### Config knobs (`config/loom-schema.toml`, `[service_config]`)
 
+DB-backed token `last_seen_at` / `last_used_at` updates are debounced to one
+write per token per 60 seconds. If high-concurrency worker sweeps show
+`QueuePool limit` errors or many sessions waiting on `UPDATE tokens`, verify
+that debounce path first; raising `db_pool_size` and `db_max_overflow` alone can
+increase queued connections without removing the token-row write hotspot.
+
 | Key | Default | What it does |
 |---|---|---|
 | `db_pool_size` | `20` | Control Plane SQLAlchemy DB connection pool size. Size with concurrent worker heartbeats, claims, state patches, and trajectory index writes. |

@@ -78,10 +78,13 @@ directory. SkillLearnBench conversion also rewrites unsupported classic-Docker
 heredoc `RUN <<EOF` forms into copied shell scripts and normalizes
 Python-to-Scala oracle output back to the task root when the upstream verifier
 expects root-level artifacts. The shim runs the upstream
-`tests/test.sh`, reads `/logs/verifier/reward.txt`, and converts that reward
-into Loom's structured `VerifierResult` JSON. Instance ids are derived from
-the relative bundle path and sanitized so spaces or shell-significant
-characters in upstream folder names cannot create invalid catalog task ids.
+`tests/test.sh` from the task root, reads `/logs/verifier/reward.txt`, and
+converts that reward into Loom's structured `VerifierResult` JSON. When the
+upstream test writes `/logs/verifier/output.log`, the shim includes the log
+tail in `structured.output_log_tail` so reward-0 verifier failures remain
+diagnosable after the sandbox is removed. Instance ids are derived from the
+relative bundle path and sanitized so spaces or shell-significant characters
+in upstream folder names cannot create invalid catalog task ids.
 
 ## LiveCodeBench coverage
 

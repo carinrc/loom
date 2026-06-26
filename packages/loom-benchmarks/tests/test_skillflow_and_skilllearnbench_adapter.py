@@ -237,6 +237,37 @@ def test_skilllearnbench_uses_root_build_context_for_root_assets(
     assert (out_dir / "DATA" / "records.json").read_text() == "[]\n"
 
 
+def test_skillflow_verifier_runs_upstream_tests_from_task_root_and_reports_log_tail(
+    tmp_path: Path,
+) -> None:
+    bundle = _write_real_bundle(
+        tmp_path,
+        family="workflow",
+        task="cwd-sensitive-verifier-task",
+    )
+    (bundle / "tests" / "test.sh").write_text(
+        "#!/bin/bash\n"
+        "echo verifier cwd is $(pwd) > /logs/verifier/output.log\n"
+        "test -f task-root-marker.txt\n"
+        "echo 0 > /logs/verifier/reward.txt\n",
+    )
+    (bundle / "task-root-marker.txt").write_text("root\n")
+    adapter = SkillFlowAdapter()
+    inst = BenchmarkInstance(
+        instance_id="workflow/cwd-sensitive-verifier-task",
+        split="test",
+        raw={"__source_path": str(bundle)},
+    )
+    out_dir = tmp_path / "out"
+
+    adapter.convert_instance(inst, out_dir=out_dir)
+
+    run_sh = (out_dir / "verifier" / "run.sh").read_text()
+    assert 'cd "$TASK_DIR"' in run_sh
+    assert 'bash "$TASK_DIR/tests/test.sh"' in run_sh
+    assert '"output_log_tail": output_log_tail' in run_sh
+
+
 def test_skilllearnbench_mirrors_environment_copy_sources_for_root_context(
     tmp_path: Path,
 ) -> None:
